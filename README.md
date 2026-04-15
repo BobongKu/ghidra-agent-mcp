@@ -2,7 +2,7 @@
 
 Docker headless Ghidra + MCP bridge for AI-powered binary analysis.
 
-> **Field report**: [Real-world usage notes on bobong.blog](http://bobong.blog/post/etc/ghidra_mcp_path_return)
+> **Field report**: [Real-world usage notes on bobong.blog](https://www.bobong.blog/post/development/ghidra_mcp_path_return)
 
 
 Ghidra runs in a Docker container as an HTTP API server. A Python MCP bridge (`bridge_lite.py`) connects any LLM that supports [Model Context Protocol](https://modelcontextprotocol.io) to the Ghidra API.
