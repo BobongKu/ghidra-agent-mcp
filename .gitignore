@@ -1,0 +1,53 @@
+# --- Build output ---
+target/
+*.class
+*.jar
+!docker/ghidra-agent-mcp.jar
+
+# --- Runtime data ---
+docker/binaries/*
+!docker/binaries/.gitkeep
+docker/results/*
+!docker/results/.gitkeep
+analysis/*
+!analysis/.gitkeep
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- IDE / Editor ---
+.idea/
+.vscode/
+*.iml
+*.swp
+*~
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Env / secrets ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# --- Logs ---
+*.log
+logs/
+
+# --- PoC test artifacts ---
+poc/dll-hijack/test_env/notepad.exe
+poc/dll-hijack/test_env/urlmon.dll
+poc/dll-hijack/test_env/hijack_proof.log

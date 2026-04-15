@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "ghidra-agent-mcp": {
+      "command": "python",
+      "args": ["bridge_lite.py"],
+      "env": {
+        "GHIDRA_AGENT_MCP_URL": "http://127.0.0.1:18089"
+      }
+    }
+  }
+}
