@@ -514,33 +514,19 @@ def health() -> str:
 
 
 @mcp.tool(name="upload_binary",
-          description="Upload a binary file from your local filesystem to the server's /binaries folder.\n"
-                      "By default this is upload-ONLY — the file is staged but not analyzed. "
-                      "Call import_binary(path='/binaries/<name>') afterwards to analyze, OR pass analyze=true "
-                      "here to do both in one shot. Two-step is recommended so you can pick the analysis level "
-                      "(fast vs normal) per file based on how big it is.\n"
+          description="Stream a local binary file to the server's /binaries folder. Upload only — does NOT "
+                      "analyze. After this returns, call import_binary(path='/binaries/<name>', "
+                      "analysis='fast'|'normal') to actually analyze.\n"
                       "Parameters:\n"
-                      "  - file_path: Local path to the binary file (required)\n"
-                      "  - analyze: Set 'true' to also analyze immediately (default: false — upload only)\n"
-                      "  - analysis: Analysis depth when analyze=true: 'fast' | 'normal' (default) | 'thorough'.\n"
-                      "      Use 'fast' for huge stripped binaries (e.g. macOS / iOS frameworks) — "
-                      "      skips Decompiler Parameter ID and other slow analyzers, ~3-5x faster. "
-                      "      Decompile / callgraph / deps still work fully.")
-def upload_binary(file_path: str, analyze: str = "", analysis: str = "normal") -> str:
+                      "  - file_path: Local path to the binary file (required)")
+def upload_binary(file_path: str) -> str:
     import pathlib
     p = pathlib.Path(file_path)
     if not p.exists():
         return json.dumps({"status": "error", "message": f"File not found: {file_path}"})
 
-    do_analyze = str(analyze).lower() in ("true", "1", "yes")
     url = f"{GHIDRA_URL}/upload"
-    params = {"filename": p.name}
-    if do_analyze:
-        # Long-poll on the server so the call returns the terminal job state.
-        params["wait"] = "600"
-        params["analysis"] = analysis or "normal"
-    else:
-        params["analyze"] = "false"
+    params = {"filename": p.name, "analyze": "false"}
     try:
         with httpx.Client(timeout=LONG_TIMEOUT) as client:
             resp = client.post(url, params=params, content=p.read_bytes(),
