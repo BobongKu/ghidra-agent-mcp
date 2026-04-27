@@ -96,9 +96,9 @@ function JobRow({ j, serverUrl }: { j: JobInfo; serverUrl: string }) {
   const elapsed = j.status === "analyzing"
     ? j.running_ms
     : j.duration_ms;
-  const cancellable = (j as JobInfo & { cancellable?: boolean }).cancellable
+  const cancellable = j.cancellable
     ?? (j.status === "queued" || j.status === "analyzing");
-  const cancelRequested = (j as JobInfo & { cancel_requested?: boolean }).cancel_requested ?? false;
+  const cancelRequested = j.cancel_requested ?? false;
 
   const [busy, setBusy] = useState(false);
   const onCancel = async () => {

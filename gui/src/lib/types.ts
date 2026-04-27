@@ -24,14 +24,7 @@ export interface ProgramInfo {
   is_current: boolean;
 }
 
-export interface ImportResult {
-  name: string;
-  format: string;
-  language: string;
-  functions: number;
-}
-
-export type JobStatus = "queued" | "analyzing" | "ready" | "error";
+export type JobStatus = "queued" | "analyzing" | "ready" | "error" | "cancelled";
 
 export interface JobInfo {
   job_id?: string;
@@ -44,6 +37,10 @@ export interface JobInfo {
   running_ms?: number;
   duration_ms?: number;
   message?: string;
+  /** True if /jobs/{id}/cancel can still affect this job (= !isTerminal). */
+  cancellable?: boolean;
+  /** True after the job has been flagged for cancellation but before the worker observes it. */
+  cancel_requested?: boolean;
   result?: {
     name?: string;
     format?: string;
