@@ -164,16 +164,17 @@ public class ProgramHandler {
     /** Submit an import-and-analyze job to the worker thread. */
     private Job submitImportJob(String type, String programName, File file,
                                 ServerContext.AnalysisLevel level) {
-        return ctx.jobManager.submit(type, programName, () -> {
-            Program prog = ctx.importAndAnalyze(file, level);
-            return Map.of(
-                "name", prog.getName(),
-                "format", prog.getExecutableFormat(),
-                "language", prog.getLanguageID().toString(),
-                "functions", prog.getFunctionManager().getFunctionCount(),
-                "analysis", level.name().toLowerCase()
-            );
-        });
+        return ctx.jobManager.submit(type, programName,
+            (Job self) -> {
+                Program prog = ctx.importAndAnalyze(file, level, self);
+                return Map.of(
+                    "name", prog.getName(),
+                    "format", prog.getExecutableFormat(),
+                    "language", prog.getLanguageID().toString(),
+                    "functions", prog.getFunctionManager().getFunctionCount(),
+                    "analysis", level.name().toLowerCase()
+                );
+            });
     }
 
     /**

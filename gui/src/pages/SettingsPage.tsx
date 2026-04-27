@@ -4,6 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { setServerUrl } from "@/lib/api";
+import { ContainerControl } from "@/components/ContainerControl";
 import type { ProjectPaths } from "@/lib/types";
 
 interface Props {
@@ -25,6 +26,7 @@ export function SettingsPage({ serverUrl, onServerUrlChange, paths }: Props) {
 
   return (
     <div className="flex-1 min-h-0 overflow-auto p-4 space-y-4">
+      <ContainerControl />
       <Card>
         <CardHeader className="py-3">
           <CardTitle className="text-sm">Server</CardTitle>

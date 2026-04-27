@@ -264,6 +264,32 @@ pub async fn cmd_get_job(job_id: String, server_url: String, wait_sec: u64) -> R
     Ok(parsed.data.unwrap_or_default())
 }
 
+/// POST /jobs/{id}/cancel — request cancellation of a running/queued job.
+/// Returns the job's current state plus a cancel_requested flag.
+#[tauri::command]
+pub async fn cmd_cancel_job(job_id: String, server_url: String) -> Result<serde_json::Value, String> {
+    let url = format!(
+        "{}/jobs/{}/cancel",
+        server_url.trim_end_matches('/'),
+        urlencode(&job_id)
+    );
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .map_err(|e| err(e.to_string()))?;
+    let resp = client.post(&url).send().await.map_err(|e| err(e.to_string()))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("HTTP {}: {}", status, body));
+    }
+    let parsed: ApiEnvelope<serde_json::Value> = resp.json().await.map_err(|e| err(e.to_string()))?;
+    if parsed.status.as_deref() == Some("error") {
+        return Err(parsed.message.unwrap_or_else(|| "server error".into()));
+    }
+    Ok(parsed.data.unwrap_or(serde_json::Value::Null))
+}
+
 /// GET /jobs?limit=N — list recent jobs newest-first.
 #[tauri::command]
 pub async fn cmd_list_jobs(server_url: String, limit: u32) -> Result<Vec<JobInfo>, String> {

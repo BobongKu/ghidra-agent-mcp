@@ -28,6 +28,15 @@ public class SchemaHandler {
             param("keep_current", "string", false, "Set to 'true' to keep the current program open (default: false)", "body"));
         addSchema(endpoints, "/program/info", "GET", "Detailed program info (format, language, memory, counts)", "program", optProg);
 
+        // Background-job tracking
+        addSchema(endpoints, "/jobs", "GET", "List recent background jobs (newest first)", "system",
+            param("limit", "integer", false, "Max entries to return (default 50, max 200)"));
+        addSchema(endpoints, "/jobs/{id}", "GET", "Get the state of a background job; supports ?wait=N long-poll", "system",
+            param("id", "string", true, "Job UUID (in path)"),
+            param("wait", "integer", false, "Block up to N seconds for terminal state (default 0, max 1800)"));
+        addSchema(endpoints, "/jobs/{id}/cancel", "POST", "Cancel a running or queued job. Stops the next analyzer step.", "system",
+            param("id", "string", true, "Job UUID (in path)"));
+
         addSchema(endpoints, "/functions", "GET", "List functions with pagination and filtering", "function",
             param("offset", "integer", false, "Skip first N functions (default 0)"),
             param("limit", "integer", false, "Max results (default 100)"),

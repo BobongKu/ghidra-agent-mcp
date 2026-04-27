@@ -1,8 +1,11 @@
-import { CheckCircle2, FileWarning, Loader2, Zap } from "lucide-react";
+import { useState } from "react";
+import { Ban, CheckCircle2, FileWarning, Loader2, XCircle, Zap } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useJobs } from "@/hooks/useJobs";
+import { tauri } from "@/lib/bridge";
 import type { JobInfo } from "@/lib/types";
 
 interface Props {
@@ -28,6 +31,8 @@ const statusIcon = (s?: string) => {
       return <CheckCircle2 className="size-3.5 text-success" />;
     case "error":
       return <FileWarning className="size-3.5 text-destructive" />;
+    case "cancelled":
+      return <Ban className="size-3.5 text-muted-foreground" />;
     default:
       return null;
   }
@@ -78,7 +83,7 @@ export function JobsBadge({ serverUrl }: Props) {
             <div className="p-4 text-xs text-muted-foreground">No jobs.</div>
           ) : (
             <ul className="divide-y">
-              {jobs.map((j) => <JobRow key={j.job_id ?? Math.random()} j={j} />)}
+              {jobs.map((j) => <JobRow key={j.job_id ?? Math.random()} j={j} serverUrl={serverUrl} />)}
             </ul>
           )}
         </ScrollArea>
@@ -87,10 +92,23 @@ export function JobsBadge({ serverUrl }: Props) {
   );
 }
 
-function JobRow({ j }: { j: JobInfo }) {
+function JobRow({ j, serverUrl }: { j: JobInfo; serverUrl: string }) {
   const elapsed = j.status === "analyzing"
     ? j.running_ms
     : j.duration_ms;
+  const cancellable = (j as JobInfo & { cancellable?: boolean }).cancellable
+    ?? (j.status === "queued" || j.status === "analyzing");
+  const cancelRequested = (j as JobInfo & { cancel_requested?: boolean }).cancel_requested ?? false;
+
+  const [busy, setBusy] = useState(false);
+  const onCancel = async () => {
+    if (!j.job_id) return;
+    setBusy(true);
+    try { await tauri.cancelJob(j.job_id, serverUrl); }
+    catch (e) { console.warn("cancel failed:", e); }
+    finally { setBusy(false); }
+  };
+
   return (
     <li className="flex items-center gap-2.5 px-3 py-2 hover:bg-accent/40">
       <span className="shrink-0">{statusIcon(j.status)}</span>
@@ -102,6 +120,12 @@ function JobRow({ j }: { j: JobInfo }) {
           <span>{j.type ?? "—"}</span>
           <span className="text-muted-foreground/50">·</span>
           <span>{j.status ?? "—"}</span>
+          {cancelRequested && j.status === "analyzing" && (
+            <>
+              <span className="text-muted-foreground/50">·</span>
+              <span className="text-warning">cancelling…</span>
+            </>
+          )}
           {j.message && (
             <>
               <span className="text-muted-foreground/50">·</span>
@@ -111,6 +135,18 @@ function JobRow({ j }: { j: JobInfo }) {
         </div>
       </div>
       <span className="text-[11px] font-mono text-muted-foreground shrink-0">{fmtMs(elapsed)}</span>
+      {cancellable && !cancelRequested && (
+        <Button
+          size="icon"
+          variant="ghost"
+          className="h-6 w-6 shrink-0"
+          title="Cancel this job"
+          disabled={busy}
+          onClick={onCancel}
+        >
+          <XCircle className="size-3.5 text-muted-foreground hover:text-destructive" />
+        </Button>
+      )}
     </li>
   );
 }

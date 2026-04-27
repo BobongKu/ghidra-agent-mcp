@@ -1,5 +1,7 @@
-import { AlertTriangle, RefreshCw } from "lucide-react";
+import { useState } from "react";
+import { AlertTriangle, Loader2, PlayCircle, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { tauri, IS_TAURI } from "@/lib/bridge";
 import type { HealthState } from "@/hooks/useHealthPolling";
 
 interface Props {
@@ -15,9 +17,32 @@ interface Props {
  * Hidden when the connection is healthy or the very first check is still pending.
  */
 export function DisconnectedBanner({ health, serverUrl, onRetry }: Props) {
+  const [starting, setStarting] = useState(false);
+  const [startMsg, setStartMsg] = useState<string | null>(null);
+
   if (health.status !== "down") return null;
   // Suppress until we've actually tried at least once
   if (!health.lastChecked) return null;
+
+  const startContainer = async () => {
+    if (!IS_TAURI) return;
+    setStarting(true);
+    setStartMsg(null);
+    try {
+      const r = await tauri.composeUp(false);
+      if (r.success) {
+        setStartMsg("started — waiting for server…");
+        // Trigger an immediate retry; the polling will then clear the banner.
+        setTimeout(() => onRetry?.(), 1500);
+      } else {
+        setStartMsg(`failed (exit ${r.exit_code ?? "?"}). Check Settings → Container for details.`);
+      }
+    } catch (e) {
+      setStartMsg(`error: ${(e as Error).message}`);
+    } finally {
+      setStarting(false);
+    }
+  };
 
   return (
     <div className="border-b border-destructive/40 bg-destructive/10 px-4 py-2 flex items-center gap-3 text-[12px]">
@@ -28,10 +53,24 @@ export function DisconnectedBanner({ health, serverUrl, onRetry }: Props) {
         </div>
         <div className="text-muted-foreground mt-0.5">
           {health.error ? <>Last error: <span className="font-mono">{health.error}</span> · </> : null}
-          Check that Docker Desktop is running and the container is up
-          (<code className="font-mono">docker compose -f docker/docker-compose.yml up -d</code>).
+          Make sure Docker Desktop is running, then click Start to launch the container.
+          {startMsg && <span className="ml-2 font-mono">{startMsg}</span>}
         </div>
       </div>
+      {IS_TAURI && (
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 gap-1.5"
+          onClick={startContainer}
+          disabled={starting}
+        >
+          {starting
+            ? <Loader2 className="size-3.5 animate-spin" />
+            : <PlayCircle className="size-3.5 text-success" />}
+          Start container
+        </Button>
+      )}
       <Button size="sm" variant="outline" className="h-7" onClick={onRetry}>
         <RefreshCw className="size-3.5" /> Retry
       </Button>

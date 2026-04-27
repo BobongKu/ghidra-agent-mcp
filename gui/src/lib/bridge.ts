@@ -3,6 +3,13 @@ import type { FileInfo, JobInfo, MetaEntry, UploadResult } from "@/lib/types";
 
 export type AnalysisLevel = "fast" | "normal" | "thorough";
 
+export interface ComposeResult {
+  action: string;
+  success: boolean;
+  exit_code: number | null;
+  output: string;
+}
+
 export const tauri = {
   listBinariesDir: (dir: string) =>
     invoke<FileInfo[]>("cmd_list_binaries_dir", { dir }),
@@ -28,6 +35,23 @@ export const tauri = {
   /** GET /jobs?limit=N — recent jobs newest-first. */
   listJobs: (serverUrl: string, limit = 20) =>
     invoke<JobInfo[]>("cmd_list_jobs", { serverUrl, limit }),
+
+  /** POST /jobs/{id}/cancel — request cancellation of a running/queued job. */
+  cancelJob: (jobId: string, serverUrl: string) =>
+    invoke<{ job_id: string; status: string; cancel_requested: boolean; message: string }>(
+      "cmd_cancel_job",
+      { jobId, serverUrl }
+    ),
+
+  /** docker compose lifecycle. */
+  composeUp: (build = false) =>
+    invoke<ComposeResult>("cmd_compose_up", { build }),
+  composeDown: () => invoke<ComposeResult>("cmd_compose_down"),
+  composeRestart: () => invoke<ComposeResult>("cmd_compose_restart"),
+  dockerStatus: () =>
+    invoke<{ daemon_reachable: boolean; server_version: string | null; error: string | null }>(
+      "cmd_docker_status"
+    ),
 
   startResultsWatcher: (metaPath: string) =>
     invoke<void>("cmd_start_results_watcher", { metaPath }),

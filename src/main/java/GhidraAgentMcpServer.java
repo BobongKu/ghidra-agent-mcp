@@ -70,7 +70,10 @@ public class GhidraAgentMcpServer {
 
         // Background-job tracking
         route("/jobs",  "GET", jobs::handleList);
-        route("/jobs/", "GET", jobs::handleGet);   // prefix-context for /jobs/{id}
+        // /jobs/{id}    GET  → status (with optional ?wait long-poll)
+        // /jobs/{id}/cancel POST → cancel
+        // The handler dispatches by URI suffix, so a single context covers both.
+        route("/jobs/", "GET", jobs::handleGet);
 
         // Function analysis
         route("/functions",          "GET",  func::handleFunctions);

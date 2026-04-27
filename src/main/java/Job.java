@@ -14,11 +14,20 @@ public class Job {
     public final String programName;   // intended target program name
     public final long submittedAt;
 
-    public volatile String status;     // "queued" | "analyzing" | "ready" | "error"
+    public volatile String status;     // "queued" | "analyzing" | "ready" | "error" | "cancelled"
     public volatile long startedAt;
     public volatile long finishedAt;
     public volatile String message;
     public volatile Map<String, Object> result;   // populated on "ready"
+
+    /** Set by /jobs/{id}/cancel; observed by the worker. */
+    public volatile boolean cancelRequested = false;
+    /**
+     * Optional hook installed by the worker so that an in-flight Ghidra
+     * analysis can be interrupted via TaskMonitor.cancel() the moment a cancel
+     * request arrives (instead of waiting for the next polling check).
+     */
+    public volatile Runnable cancelHook;
 
     private final Object monitor = new Object();
 
@@ -31,7 +40,21 @@ public class Job {
     }
 
     public boolean isTerminal() {
-        return "ready".equals(status) || "error".equals(status);
+        return "ready".equals(status) || "error".equals(status) || "cancelled".equals(status);
+    }
+
+    /**
+     * Mark this job for cancellation. Returns true if a cancellation was actually
+     * requested (i.e. the job was not already terminal).
+     */
+    public boolean requestCancel() {
+        if (isTerminal()) return false;
+        cancelRequested = true;
+        Runnable hook = cancelHook;
+        if (hook != null) {
+            try { hook.run(); } catch (Throwable ignored) {}
+        }
+        return true;
     }
 
     /** Block until this job reaches a terminal state, or {@code timeoutMillis} elapses. */
@@ -67,6 +90,8 @@ public class Job {
         }
         if (message != null) m.put("message", message);
         if (result != null) m.put("result", result);
+        m.put("cancellable", !isTerminal());
+        if (cancelRequested) m.put("cancel_requested", true);
         return m;
     }
 }

@@ -433,10 +433,19 @@ public class ServerContext {
     }
 
     public Program importAndAnalyze(File file) throws Exception {
-        return importAndAnalyze(file, AnalysisLevel.NORMAL);
+        return importAndAnalyze(file, AnalysisLevel.NORMAL, null);
     }
 
     public Program importAndAnalyze(File file, AnalysisLevel level) throws Exception {
+        return importAndAnalyze(file, level, null);
+    }
+
+    /**
+     * Import and analyze, with optional cancellation routed through a Ghidra
+     * TaskMonitor. {@code job} is the {@link Job} record so we can install a
+     * cancel hook the moment we have a live monitor.
+     */
+    public Program importAndAnalyze(File file, AnalysisLevel level, Job job) throws Exception {
         String fileName = file.getName();
         // Fast path under stateLock: if already loaded, return the existing reference.
         synchronized (stateLock) {
@@ -480,12 +489,28 @@ public class ServerContext {
             System.out.println("[analysis] FAST mode for " + fileName + " (slow analyzers disabled)");
         }
         mgr.reAnalyzeAll(null);
+
+        // Build a cancellable TaskMonitor so /jobs/{id}/cancel can interrupt
+        // an in-flight analysis (Ghidra checks monitor.isCancelled() between
+        // analyzer steps and aborts cleanly).
+        var taskMonitor = new ghidra.util.task.TaskMonitorAdapter(true);
+        if (job != null) {
+            // Honour a cancel that arrived between submission and now.
+            if (job.cancelRequested) taskMonitor.cancel();
+            // Wire up the live hook so /cancel can flip the monitor immediately.
+            job.cancelHook = taskMonitor::cancel;
+        }
         try {
-            mgr.startAnalysis(TaskMonitor.DUMMY);
+            mgr.startAnalysis(taskMonitor);
         } catch (Exception e) {
             // Analysis failure: don't register the half-baked program.
             try { prog.setTemporary(true); } catch (Exception ignored) {}
             throw e;
+        }
+        if (taskMonitor.isCancelled()) {
+            // Drop the partially-analysed program rather than persist it.
+            try { prog.setTemporary(true); } catch (Exception ignored) {}
+            throw new ghidra.util.exception.CancelledException("import cancelled");
         }
 
         // Persist via GhidraProject.saveAs which is the documented API for

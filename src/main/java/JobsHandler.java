@@ -28,14 +28,21 @@ public class JobsHandler {
      */
     public void handleGet(HttpExchange ex) throws Exception {
         String path = ex.getRequestURI().getPath();
-        String id = path.substring("/jobs/".length()).replaceAll("/+$", "");
-        if (id.isBlank()) {
+        // Route by suffix so /jobs/{id} and /jobs/{id}/cancel share this handler.
+        String trimmed = path.substring("/jobs/".length()).replaceAll("/+$", "");
+        if (trimmed.isBlank()) {
             ctx.sendError(ex, 400, "missing job id in /jobs/{id}");
             return;
         }
+        boolean cancel = trimmed.endsWith("/cancel");
+        String id = cancel ? trimmed.substring(0, trimmed.length() - "/cancel".length()) : trimmed;
         Job job = ctx.jobManager.get(id);
         if (job == null) {
             ctx.sendError(ex, 404, "job not found: " + id);
+            return;
+        }
+        if (cancel) {
+            handleCancel(ex, job);
             return;
         }
         var query = ctx.parseQuery(ex);
@@ -45,6 +52,26 @@ public class JobsHandler {
             catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
         }
         ctx.sendOk(ex, job.toMap());
+    }
+
+    /**
+     * POST /jobs/{id}/cancel — flag the job for cancellation. If a Ghidra
+     * TaskMonitor was registered (via {@link Job#cancelHook}), the in-flight
+     * analysis is interrupted at the next analyzer step boundary.
+     */
+    private void handleCancel(HttpExchange ex, Job job) throws Exception {
+        boolean newlyRequested = job.requestCancel();
+        var resp = new java.util.LinkedHashMap<String, Object>();
+        resp.put("job_id", job.id);
+        resp.put("status", job.status);
+        resp.put("cancel_requested", job.cancelRequested);
+        resp.put("was_terminal", !newlyRequested && job.isTerminal());
+        if (!newlyRequested && job.isTerminal()) {
+            resp.put("message", "job is already " + job.status + "; nothing to cancel");
+        } else {
+            resp.put("message", "cancellation requested; analysis will stop at the next checkpoint");
+        }
+        ctx.sendOk(ex, resp);
     }
 
     private static int parseIntDef(String s, int def) {

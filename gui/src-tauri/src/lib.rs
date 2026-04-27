@@ -1,4 +1,5 @@
 mod commands;
+mod compose;
 mod docker_logs;
 mod watcher;
 
@@ -23,6 +24,11 @@ pub fn run() {
             commands::cmd_open_folder,
             commands::cmd_open_docker_logs,
             commands::cmd_resolve_project_paths,
+            commands::cmd_cancel_job,
+            compose::cmd_compose_up,
+            compose::cmd_compose_down,
+            compose::cmd_compose_restart,
+            compose::cmd_docker_status,
             docker_logs::cmd_start_docker_logs,
             docker_logs::cmd_stop_docker_logs,
             watcher::cmd_start_results_watcher,
