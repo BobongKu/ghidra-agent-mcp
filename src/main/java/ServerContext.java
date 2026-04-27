@@ -413,7 +413,30 @@ public class ServerContext {
      * thread provides equivalent serialisation. If you need to call this from
      * elsewhere, do it via {@code ctx.jobManager.submit(...)}.
      */
+    /** Analysis depth selector for importAndAnalyze. Default is NORMAL. */
+    public enum AnalysisLevel {
+        FAST,     // Skip the slowest analyzers — best for huge stripped binaries
+        NORMAL,   // Ghidra defaults (minus headless-broken analyzers)
+        THOROUGH; // Defaults + extra (currently same as NORMAL; reserved)
+
+        public static AnalysisLevel parse(String s) {
+            if (s == null) return NORMAL;
+            switch (s.trim().toLowerCase()) {
+                case "fast":     return FAST;
+                case "thorough": return THOROUGH;
+                case "":
+                case "normal":
+                case "default":  return NORMAL;
+                default:         return NORMAL;
+            }
+        }
+    }
+
     public Program importAndAnalyze(File file) throws Exception {
+        return importAndAnalyze(file, AnalysisLevel.NORMAL);
+    }
+
+    public Program importAndAnalyze(File file, AnalysisLevel level) throws Exception {
         String fileName = file.getName();
         // Fast path under stateLock: if already loaded, return the existing reference.
         synchronized (stateLock) {
@@ -433,6 +456,29 @@ public class ServerContext {
         var options = prog.getOptions("Analyzers");
         // Disable analyzers that fail in headless mode (no script directories)
         options.setBoolean("Windows Resource Reference Analyzer", false);
+
+        if (level == AnalysisLevel.FAST) {
+            // The decompiler-driven analyzers run the decompiler on every function,
+            // typically dominating analysis time on stripped ARM64 / Mach-O binaries
+            // (e.g. Apple Silicon system frameworks). Skipping them still leaves a
+            // fully usable program: callgraph, deps, listing, strings, symbols, and
+            // on-demand /decompile all keep working.
+            for (String name : new String[] {
+                "Decompiler Parameter ID",
+                "Decompiler Switch Analysis",
+                "ARM Aggressive Instruction Finder",
+                "x86 Constant Reference Analyzer",
+                "Apply Data Archives",
+                "DWARF",
+                "Embedded Media",
+                "Function ID",
+                "Library Identification",
+                "Stack",
+            }) {
+                try { options.setBoolean(name, false); } catch (Exception ignored) {}
+            }
+            System.out.println("[analysis] FAST mode for " + fileName + " (slow analyzers disabled)");
+        }
         mgr.reAnalyzeAll(null);
         try {
             mgr.startAnalysis(TaskMonitor.DUMMY);

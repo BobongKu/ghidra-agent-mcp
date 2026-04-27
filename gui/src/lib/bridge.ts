@@ -1,6 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { FileInfo, JobInfo, MetaEntry, UploadResult } from "@/lib/types";
 
+export type AnalysisLevel = "fast" | "normal" | "thorough";
+
 export const tauri = {
   listBinariesDir: (dir: string) =>
     invoke<FileInfo[]>("cmd_list_binaries_dir", { dir }),
@@ -11,13 +13,13 @@ export const tauri = {
   readResultFile: (path: string, maxChars: number) =>
     invoke<string>("cmd_read_result_file", { path, maxChars }),
 
-  /** POST /upload?wait=0 — returns immediately with job_id. */
-  uploadBinary: (filePath: string, serverUrl: string) =>
-    invoke<UploadResult>("cmd_upload_binary", { filePath, serverUrl }),
+  /** POST /upload — server long-polls to completion. analysis: fast | normal | thorough */
+  uploadBinary: (filePath: string, serverUrl: string, analysis: AnalysisLevel = "normal") =>
+    invoke<UploadResult>("cmd_upload_binary", { filePath, serverUrl, analysis }),
 
-  /** POST /import?wait=0 — schedule import for a server-visible binary. */
-  importBinary: (serverPath: string, serverUrl: string) =>
-    invoke<UploadResult>("cmd_import_binary", { serverPath, serverUrl }),
+  /** POST /import — schedule import for a server-visible binary. */
+  importBinary: (serverPath: string, serverUrl: string, analysis: AnalysisLevel = "normal") =>
+    invoke<UploadResult>("cmd_import_binary", { serverPath, serverUrl, analysis }),
 
   /** GET /jobs/{id}?wait=N — long-poll a job for up to waitSec seconds. */
   getJob: (jobId: string, serverUrl: string, waitSec: number) =>

@@ -128,7 +128,8 @@ public class ProgramHandler {
 
         // Submit job + (optionally) wait
         long waitSec = JobsHandler.parseWaitParam(query, 120);
-        Job job = submitImportJob("upload", safeName, dest);
+        var level = ServerContext.AnalysisLevel.parse(query.get("analysis"));
+        Job job = submitImportJob("upload", safeName, dest, level);
         respondWithJob(ex, job, waitSec, dest);
     }
 
@@ -149,19 +150,28 @@ public class ProgramHandler {
 
         var query = ctx.parseQuery(ex);
         long waitSec = JobsHandler.parseWaitParam(query, 120);
-        Job job = submitImportJob("import", file.getName(), file);
+        // /import accepts the analysis level via query OR body.
+        String levelStr = query.get("analysis");
+        if (levelStr == null) {
+            Object bodyVal = body.get("analysis");
+            if (bodyVal != null) levelStr = bodyVal.toString();
+        }
+        var level = ServerContext.AnalysisLevel.parse(levelStr);
+        Job job = submitImportJob("import", file.getName(), file, level);
         respondWithJob(ex, job, waitSec, file);
     }
 
     /** Submit an import-and-analyze job to the worker thread. */
-    private Job submitImportJob(String type, String programName, File file) {
+    private Job submitImportJob(String type, String programName, File file,
+                                ServerContext.AnalysisLevel level) {
         return ctx.jobManager.submit(type, programName, () -> {
-            Program prog = ctx.importAndAnalyze(file);
+            Program prog = ctx.importAndAnalyze(file, level);
             return Map.of(
                 "name", prog.getName(),
                 "format", prog.getExecutableFormat(),
                 "language", prog.getLanguageID().toString(),
-                "functions", prog.getFunctionManager().getFunctionCount()
+                "functions", prog.getFunctionManager().getFunctionCount(),
+                "analysis", level.name().toLowerCase()
             );
         });
     }

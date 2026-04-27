@@ -7,9 +7,11 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
-import { tauri, IS_TAURI } from "@/lib/bridge";
+import { tauri, IS_TAURI, type AnalysisLevel } from "@/lib/bridge";
 import { cn } from "@/lib/utils";
 import type { UploadJob } from "@/lib/types";
+
+const ANALYSIS_STORAGE_KEY = "ghidra-agent-mcp.analysis-level";
 
 interface Props {
   serverUrl: string;
@@ -22,6 +24,15 @@ export function DropZone({ serverUrl, onUploaded }: Props) {
   const [hover, setHover] = useState(false);
   const [jobs, setJobs] = useState<UploadJob[]>([]);
   const [busy, setBusy] = useState(false);
+  const [analysis, setAnalysis] = useState<AnalysisLevel>(() => {
+    const saved = (typeof window !== "undefined"
+      ? localStorage.getItem(ANALYSIS_STORAGE_KEY)
+      : null) as AnalysisLevel | null;
+    return saved ?? "normal";
+  });
+  useEffect(() => {
+    localStorage.setItem(ANALYSIS_STORAGE_KEY, analysis);
+  }, [analysis]);
 
   useEffect(() => {
     if (!IS_TAURI) return;
@@ -58,7 +69,7 @@ export function DropZone({ serverUrl, onUploaded }: Props) {
       try {
         // Sync request: server blocks up to 10 min, returns terminal state.
         // Ghidra analyzes one binary at a time anyway — async polling buys nothing here.
-        const r = await tauri.uploadBinary(j.path, serverUrl);
+        const r = await tauri.uploadBinary(j.path, serverUrl, analysis);
         const ok = r.status === "ready" || r.imported === true;
         const fns = r.result?.functions ?? r.functions;
         setJobs((prev) =>
@@ -137,6 +148,7 @@ export function DropZone({ serverUrl, onUploaded }: Props) {
           )}
         </CardTitle>
         <div className="flex-1" />
+        <AnalysisLevelToggle value={analysis} onChange={setAnalysis} />
         <Tooltip>
           <TooltipTrigger asChild>
             <span>
@@ -202,6 +214,50 @@ export function DropZone({ serverUrl, onUploaded }: Props) {
         )}
       </CardContent>
     </Card>
+  );
+}
+
+function AnalysisLevelToggle({
+  value,
+  onChange,
+}: {
+  value: AnalysisLevel;
+  onChange: (v: AnalysisLevel) => void;
+}) {
+  const opts: { v: AnalysisLevel; label: string; hint: string }[] = [
+    { v: "fast",     label: "fast",     hint: "Skip slow decompiler analyzers — best for huge stripped binaries (e.g. macOS frameworks). 3–5× faster." },
+    { v: "normal",   label: "normal",   hint: "Ghidra defaults. Good for most PE/ELF binaries." },
+    { v: "thorough", label: "thorough", hint: "Reserved for future extra analyzers. Same as normal today." },
+  ];
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <div className="inline-flex h-7 rounded-md border bg-muted/30 overflow-hidden text-[11px] font-mono">
+          {opts.map((o) => (
+            <button
+              key={o.v}
+              onClick={() => onChange(o.v)}
+              className={cn(
+                "px-2 transition-colors",
+                value === o.v
+                  ? "bg-primary/15 text-primary border-l border-r border-primary/30 first:border-l-0 last:border-r-0"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+      </TooltipTrigger>
+      <TooltipContent side="bottom" className="max-w-[260px]">
+        <div className="space-y-1 text-[11px]">
+          <div><b>Analysis depth</b> for new uploads.</div>
+          <div className="text-muted-foreground">
+            {opts.find((o) => o.v === value)?.hint}
+          </div>
+        </div>
+      </TooltipContent>
+    </Tooltip>
   );
 }
 

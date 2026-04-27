@@ -155,7 +155,11 @@ pub async fn cmd_read_result_file(path: String, max_chars: usize) -> Result<Stri
 /// internally (history is visible in the Jobs page), but the GUI uses the
 /// simple sync API.
 #[tauri::command]
-pub async fn cmd_upload_binary(file_path: String, server_url: String) -> Result<UploadEnvelopeData, String> {
+pub async fn cmd_upload_binary(
+    file_path: String,
+    server_url: String,
+    analysis: Option<String>,
+) -> Result<UploadEnvelopeData, String> {
     let p = PathBuf::from(&file_path);
     if !p.is_file() {
         return Err(format!("file not found: {}", file_path));
@@ -167,10 +171,12 @@ pub async fn cmd_upload_binary(file_path: String, server_url: String) -> Result<
 
     let bytes = tokio::fs::read(&p).await.map_err(|e| err(e.to_string()))?;
 
+    let level = analysis.as_deref().unwrap_or("normal");
     let url = format!(
-        "{}/upload?filename={}&wait=600",
+        "{}/upload?filename={}&wait=600&analysis={}",
         server_url.trim_end_matches('/'),
-        urlencode(&name)
+        urlencode(&name),
+        urlencode(level)
     );
     // 30-min HTTP timeout to safely cover the 10-min server-side wait + slack.
     let client = reqwest::Client::builder()
@@ -201,13 +207,18 @@ pub async fn cmd_upload_binary(file_path: String, server_url: String) -> Result<
 
 /// POST /import?wait=600 — block on server for up to 10 minutes.
 #[tauri::command]
-pub async fn cmd_import_binary(server_path: String, server_url: String) -> Result<UploadEnvelopeData, String> {
+pub async fn cmd_import_binary(
+    server_path: String,
+    server_url: String,
+    analysis: Option<String>,
+) -> Result<UploadEnvelopeData, String> {
     let url = format!("{}/import?wait=600", server_url.trim_end_matches('/'));
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(30 * 60))
         .build()
         .map_err(|e| err(e.to_string()))?;
-    let body = serde_json::json!({ "path": server_path });
+    let level = analysis.as_deref().unwrap_or("normal").to_string();
+    let body = serde_json::json!({ "path": server_path, "analysis": level });
     let resp = client
         .post(&url)
         .json(&body)

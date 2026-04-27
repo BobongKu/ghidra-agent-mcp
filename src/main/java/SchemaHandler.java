@@ -16,9 +16,11 @@ public class SchemaHandler {
         addSchema(endpoints, "/health", "GET", "Server health, loaded programs, and available binaries", "system");
         addSchema(endpoints, "/upload", "POST", "Upload and analyze a binary file. Send raw file bytes as request body", "program",
             param("filename", "string", true, "Output filename, e.g. test.exe"),
-            param("analyze", "string", false, "Set to 'false' to skip auto-analysis"));
+            param("analyze", "string", false, "Set to 'false' to skip auto-analysis"),
+            param("analysis", "string", false, "Analysis depth: fast | normal (default) | thorough. Use 'fast' for huge stripped binaries (e.g. macOS/iOS frameworks) — skips Decompiler Parameter ID and other slow analyzers."));
         addSchema(endpoints, "/import", "POST", "Import a binary already in /binaries directory", "program",
-            param("path", "string", true, "Absolute path to binary, e.g. /binaries/test.exe", "body"));
+            param("path", "string", true, "Absolute path to binary, e.g. /binaries/test.exe", "body"),
+            param("analysis", "string", false, "Analysis depth: fast | normal (default) | thorough. Use 'fast' for huge stripped binaries — skips Decompiler Parameter ID and other slow analyzers."));
         addSchema(endpoints, "/programs", "GET", "List all loaded programs", "program");
         addSchema(endpoints, "/program/close", "POST", "Close and unload a program", "program",
             param("name", "string", true, "Program name to close", "body"));
