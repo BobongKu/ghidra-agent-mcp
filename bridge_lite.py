@@ -446,7 +446,7 @@ STATIC_TOOL_NAMES = {"health", "upload_binary", "import_binary", "decompile_func
                      "dependency_tree", "dependency_summary", "match_imports_exports",
                      "read_result", "list_results",
                      # Job tracking + cross-program search + batch import
-                     "list_jobs", "get_job", "find_function",
+                     "list_jobs", "get_job", "cancel_job", "find_function",
                      "search_strings", "search_symbols", "batch_import_directory",
                      # Schema-derived dynamic tools that we override above
                      "search", "jobs"}
@@ -514,18 +514,32 @@ def health() -> str:
 
 
 @mcp.tool(name="upload_binary",
-          description="Upload a binary file from local filesystem for analysis.\n"
-                      "Parameters:\n  - file_path: Local path to the binary file (required)\n"
-                      "  - analyze: Set to false to skip auto-analysis (optional)")
-def upload_binary(file_path: str, analyze: bool = True) -> str:
+          description="Upload a binary file from your local filesystem to the server's /binaries folder.\n"
+                      "By default this is upload-ONLY — the file is staged but not analyzed. "
+                      "Call import_binary(path='/binaries/<name>') afterwards to analyze, OR pass analyze=true "
+                      "here to do both in one shot. Two-step is recommended so you can pick the analysis level "
+                      "(fast vs normal) per file based on how big it is.\n"
+                      "Parameters:\n"
+                      "  - file_path: Local path to the binary file (required)\n"
+                      "  - analyze: Set 'true' to also analyze immediately (default: false — upload only)\n"
+                      "  - analysis: Analysis depth when analyze=true: 'fast' | 'normal' (default) | 'thorough'.\n"
+                      "      Use 'fast' for huge stripped binaries (e.g. macOS / iOS frameworks) — "
+                      "      skips Decompiler Parameter ID and other slow analyzers, ~3-5x faster. "
+                      "      Decompile / callgraph / deps still work fully.")
+def upload_binary(file_path: str, analyze: str = "", analysis: str = "normal") -> str:
     import pathlib
     p = pathlib.Path(file_path)
     if not p.exists():
         return json.dumps({"status": "error", "message": f"File not found: {file_path}"})
 
+    do_analyze = str(analyze).lower() in ("true", "1", "yes")
     url = f"{GHIDRA_URL}/upload"
     params = {"filename": p.name}
-    if not analyze:
+    if do_analyze:
+        # Long-poll on the server so the call returns the terminal job state.
+        params["wait"] = "600"
+        params["analysis"] = analysis or "normal"
+    else:
         params["analyze"] = "false"
     try:
         with httpx.Client(timeout=LONG_TIMEOUT) as client:
@@ -540,10 +554,21 @@ def upload_binary(file_path: str, analyze: bool = True) -> str:
 
 
 @mcp.tool(name="import_binary",
-          description="Import a binary already inside the server's /binaries directory.\n"
-                      "Parameters:\n  - path: Path on server, e.g. /binaries/test.exe (required)")
-def import_binary(path: str) -> str:
-    return _format_result(ghidra_request("POST", "/import", body={"path": path}), tool_name="import")
+          description="Analyze a binary that's already in the server's /binaries directory.\n"
+                      "Use this after upload_binary or batch_import_directory(analyze=false) to actually run analysis.\n"
+                      "The call long-polls until the analyze job is terminal (up to 10 minutes); poll get_job(job_id, "
+                      "wait=60) afterwards if you need to keep waiting on a really big binary.\n"
+                      "Parameters:\n"
+                      "  - path: Path on server, e.g. /binaries/test.exe (required)\n"
+                      "  - analysis: Analysis depth: 'fast' | 'normal' (default) | 'thorough'.\n"
+                      "      Use 'fast' for huge stripped binaries (macOS / iOS frameworks etc.) — "
+                      "      ~3-5x faster, decompile / callgraph / deps still work fully.")
+def import_binary(path: str, analysis: str = "normal") -> str:
+    return _format_result(
+        ghidra_request("POST", "/import",
+                       params={"wait": "600"},
+                       body={"path": path, "analysis": analysis or "normal"}),
+        tool_name="import")
 
 
 @mcp.tool(name="decompile_function",
@@ -631,6 +656,18 @@ def get_job(job_id: str, wait: str = "0") -> str:
                           tool_name="job")
 
 
+@mcp.tool(name="cancel_job",
+          description="Cancel a running or queued analyze job. The server interrupts the Ghidra TaskMonitor "
+                      "at the next analyzer step boundary; the partially-analyzed program is dropped (not "
+                      "persisted). Useful when an import is taking far longer than expected — cancel it, "
+                      "then re-import with analysis='fast'.\n"
+                      "Parameters:\n"
+                      "  - job_id: UUID of the job to cancel (required)")
+def cancel_job(job_id: str) -> str:
+    return _format_result(ghidra_request("POST", f"/jobs/{job_id}/cancel"),
+                          tool_name="job_cancel")
+
+
 # ==================== Cross-program search ====================
 
 @mcp.tool(name="find_function",
@@ -687,12 +724,17 @@ def search_symbols(query: str, case_sensitive: str = "", limit: str = "100") -> 
                       "Parameters:\n"
                       "  - directory: Directory inside the server (default /binaries)\n"
                       "  - pattern: Glob-ish suffix filter (default '' = all files; e.g. '.exe', '.dll')\n"
-                      "  - limit: Max files to enqueue (default 50)")
-def batch_import_directory(directory: str = "/binaries", pattern: str = "", limit: str = "50") -> str:
+                      "  - limit: Max files to enqueue (default 50)\n"
+                      "  - analysis: Analysis depth for every queued job: 'fast' | 'normal' (default) | 'thorough'.\n"
+                      "      Strongly consider 'fast' when batch-loading large/stripped binaries — total wall time "
+                      "      for a 50-file directory of ARM64 / Mach-O frameworks drops from hours to ~20 minutes.")
+def batch_import_directory(directory: str = "/binaries", pattern: str = "",
+                           limit: str = "50", analysis: str = "normal") -> str:
     try:
         n = max(1, min(int(limit), 200))
     except (TypeError, ValueError):
         n = 50
+    level = analysis or "normal"
 
     # Reuse /health to confirm server visibility of binaries dir; fall back to listing via os.
     h = ghidra_request("GET", "/health")
@@ -721,7 +763,7 @@ def batch_import_directory(directory: str = "/binaries", pattern: str = "", limi
         path = directory.rstrip("/") + "/" + fname
         resp = ghidra_request("POST", "/import",
                               params={"wait": "0"},
-                              body={"path": path})
+                              body={"path": path, "analysis": level})
         if resp.get("status") == "ok":
             d = resp.get("data", {})
             submitted.append({
@@ -740,9 +782,11 @@ def batch_import_directory(directory: str = "/binaries", pattern: str = "", limi
         "data": {
             "directory": directory,
             "pattern": pattern,
+            "analysis": level,
             "submitted": submitted,
             "count": len(submitted),
-            "hint": "Poll list_jobs() or get_job(job_id, wait=60) for progress.",
+            "hint": "Poll list_jobs() or get_job(job_id, wait=60) for progress. "
+                    "To stop a job partway, call cancel_job(job_id).",
         }
     }, tool_name="batch_import_directory")
 
