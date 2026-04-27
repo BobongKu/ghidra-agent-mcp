@@ -495,10 +495,13 @@ public class ServerContext {
         // analyzer steps and aborts cleanly).
         var taskMonitor = new ghidra.util.task.TaskMonitorAdapter(true);
         if (job != null) {
-            // Honour a cancel that arrived between submission and now.
-            if (job.cancelRequested) taskMonitor.cancel();
-            // Wire up the live hook so /cancel can flip the monitor immediately.
+            // Wire up the live hook FIRST so a cancel arriving in the tiny
+            // window before startAnalysis() is observed by the monitor.
             job.cancelHook = taskMonitor::cancel;
+            // Then honour any cancel already queued. Order matters: if we set
+            // the hook after this check, a cancel landing between the two
+            // assignments would miss both the flag and the hook.
+            if (job.cancelRequested) taskMonitor.cancel();
         }
         try {
             mgr.startAnalysis(taskMonitor);

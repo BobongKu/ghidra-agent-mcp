@@ -42,6 +42,12 @@ public class JobsHandler {
             return;
         }
         if (cancel) {
+            // Mutating endpoint — require POST so a stray browser GET can't
+            // cancel a long-running analyze.
+            if (!"POST".equalsIgnoreCase(ex.getRequestMethod())) {
+                ctx.sendError(ex, 405, "/jobs/{id}/cancel requires POST");
+                return;
+            }
             handleCancel(ex, job);
             return;
         }

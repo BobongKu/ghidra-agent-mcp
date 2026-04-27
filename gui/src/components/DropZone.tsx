@@ -121,7 +121,7 @@ export function DropZone({ serverUrl, onUploaded }: Props) {
             <div className="grid place-items-center w-16 h-16 rounded-md border-2 border-primary bg-primary/25 text-primary">
               <Upload className="size-7" />
             </div>
-            <div className="text-sm font-semibold text-primary">Drop to upload &amp; analyze</div>
+            <div className="text-sm font-semibold text-primary">Drop to upload</div>
           </div>
         </div>
       )}
