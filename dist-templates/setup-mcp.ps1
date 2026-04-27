@@ -15,7 +15,9 @@ param(
     [switch]$WriteLocal
 )
 
-$ErrorActionPreference = "Stop"
+# pip writes its progress bar to stderr; keep ErrorActionPreference relaxed
+# and check $LASTEXITCODE explicitly after each native call.
+$ErrorActionPreference = 'Continue'
 $Root = $PSScriptRoot
 
 # 1. Python check

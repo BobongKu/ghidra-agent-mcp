@@ -2,19 +2,23 @@
 .SYNOPSIS
     One-click launcher: start Ghidra server container + open the GUI.
 #>
-$ErrorActionPreference = "Stop"
+# NOTE: Do NOT set $ErrorActionPreference = 'Stop' here.
+# Native commands (docker, docker compose) routinely write progress/info
+# to stderr while exiting 0; with Stop, that becomes a terminating error.
+# We check $LASTEXITCODE explicitly after every native call instead.
+$ErrorActionPreference = 'Continue'
 $Root = $PSScriptRoot
 
 Write-Host "`n=== ghidra-agent-mcp ===" -ForegroundColor Cyan
 
-# 1. Docker check (native exit code, not exception)
-$null = docker version --format '{{.Server.Version}}' 2>$null
+# 1. Docker check (probe the daemon; swallow output, inspect exit code).
+& docker version --format '{{.Server.Version}}' *> $null
 if ($LASTEXITCODE -ne 0) {
     Write-Host ""
     Write-Host "Docker daemon is not reachable." -ForegroundColor Red
     Write-Host "  - Open Docker Desktop and wait until the whale icon turns green." -ForegroundColor Yellow
-    Write-Host "  - If you see 'Switch to Linux containers...' in the tray menu, click it." -ForegroundColor Yellow
-    Write-Host "  - Verify with:  docker info --format '{{.OperatingSystem}}'" -ForegroundColor DarkGray
+    Write-Host "  - If the tray menu shows 'Switch to Linux containers...', click it." -ForegroundColor Yellow
+    Write-Host "  - Verify with:  docker info --format `"{{.OperatingSystem}}`"" -ForegroundColor DarkGray
     Write-Host ""
     Read-Host "Press Enter to exit"
     exit 1
