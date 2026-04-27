@@ -38,6 +38,12 @@ NOTES
     PowerShell execution policy automatically.
 
 TROUBLESHOOTING
+  - "Docker daemon is not reachable" / "open //./pipe/dockerDesktopLinuxEngine":
+      Docker Desktop is not running, or it's stuck initialising, or it's
+      currently in Windows-containers mode (we need Linux containers).
+      Fix: open Docker Desktop, wait for the whale icon to turn green,
+      and if the tray menu shows "Switch to Linux containers..." click it.
+      Verify with:  docker info --format "{{.OperatingSystem}}"
   - Red "Cannot reach server" banner in GUI:
       Docker Desktop is not running, or the container failed to start.
       Logs:  docker compose -f docker\docker-compose.yml logs -f

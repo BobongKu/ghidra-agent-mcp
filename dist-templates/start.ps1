@@ -7,10 +7,15 @@ $Root = $PSScriptRoot
 
 Write-Host "`n=== ghidra-agent-mcp ===" -ForegroundColor Cyan
 
-# 1. Docker check
-try { docker version --format '{{.Server.Version}}' | Out-Null }
-catch {
-    Write-Host "Docker is not running. Please start Docker Desktop first." -ForegroundColor Red
+# 1. Docker check (native exit code, not exception)
+$null = docker version --format '{{.Server.Version}}' 2>$null
+if ($LASTEXITCODE -ne 0) {
+    Write-Host ""
+    Write-Host "Docker daemon is not reachable." -ForegroundColor Red
+    Write-Host "  - Open Docker Desktop and wait until the whale icon turns green." -ForegroundColor Yellow
+    Write-Host "  - If you see 'Switch to Linux containers...' in the tray menu, click it." -ForegroundColor Yellow
+    Write-Host "  - Verify with:  docker info --format '{{.OperatingSystem}}'" -ForegroundColor DarkGray
+    Write-Host ""
     Read-Host "Press Enter to exit"
     exit 1
 }
