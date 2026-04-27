@@ -7,12 +7,9 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
-import { tauri, IS_TAURI, type AnalysisLevel } from "@/lib/bridge";
+import { tauri, IS_TAURI } from "@/lib/bridge";
 import { cn } from "@/lib/utils";
 import type { UploadJob } from "@/lib/types";
-
-const ANALYSIS_STORAGE_KEY = "ghidra-agent-mcp.analysis-level";
-const AUTO_ANALYZE_STORAGE_KEY = "ghidra-agent-mcp.auto-analyze";
 
 interface Props {
   serverUrl: string;
@@ -25,26 +22,6 @@ export function DropZone({ serverUrl, onUploaded }: Props) {
   const [hover, setHover] = useState(false);
   const [jobs, setJobs] = useState<UploadJob[]>([]);
   const [busy, setBusy] = useState(false);
-  const [analysis, setAnalysis] = useState<AnalysisLevel>(() => {
-    const saved = (typeof window !== "undefined"
-      ? localStorage.getItem(ANALYSIS_STORAGE_KEY)
-      : null) as AnalysisLevel | null;
-    return saved ?? "normal";
-  });
-  useEffect(() => {
-    localStorage.setItem(ANALYSIS_STORAGE_KEY, analysis);
-  }, [analysis]);
-
-  const [autoAnalyze, setAutoAnalyze] = useState<boolean>(() => {
-    const saved = typeof window !== "undefined"
-      ? localStorage.getItem(AUTO_ANALYZE_STORAGE_KEY)
-      : null;
-    // Default: false — drop = upload-only, user clicks Import from the panel.
-    return saved === null ? false : saved === "true";
-  });
-  useEffect(() => {
-    localStorage.setItem(AUTO_ANALYZE_STORAGE_KEY, String(autoAnalyze));
-  }, [autoAnalyze]);
 
   useEffect(() => {
     if (!IS_TAURI) return;
@@ -81,24 +58,20 @@ export function DropZone({ serverUrl, onUploaded }: Props) {
       try {
         // Sync request: server blocks up to 10 min, returns terminal state.
         // Ghidra analyzes one binary at a time anyway — async polling buys nothing here.
-        const r = await tauri.uploadBinary(j.path, serverUrl, analysis, autoAnalyze);
-        // Two success modes:
-        //   autoAnalyze=true  -> server returns r.status="ready" / imported=true
-        //   autoAnalyze=false -> server returns imported=false + size; treat as success
-        const ok = autoAnalyze
-          ? (r.status === "ready" || r.imported === true)
-          : (r.size != null && r.size > 0) || r.imported === false;
-        const fns = r.result?.functions ?? r.functions;
-        const doneMsg = autoAnalyze
-          ? `${fns ?? "?"} fns`
-          : "uploaded · click Import to analyze";
+        // Drop = upload-only. The server streams bytes to /binaries and
+        // returns immediately (analyze=false). The user picks the analysis
+        // level and triggers analysis from the binaries panel below.
+        const r = await tauri.uploadBinary(j.path, serverUrl, "normal", false);
+        const ok = (r.size != null && r.size > 0) || r.imported === false;
         setJobs((prev) =>
           prev.map((x) =>
             x.id === j.id
               ? {
                   ...x,
                   status: ok ? "done" : "error",
-                  message: ok ? doneMsg : (r.error ?? r.message ?? "upload failed"),
+                  message: ok
+                    ? "uploaded · click Import to analyze"
+                    : (r.error ?? r.message ?? "upload failed"),
                   size: r.size ?? 0,
                   finishedAt: Date.now(),
                 }
@@ -166,8 +139,6 @@ export function DropZone({ serverUrl, onUploaded }: Props) {
           )}
         </CardTitle>
         <div className="flex-1" />
-        <AutoAnalyzeToggle value={autoAnalyze} onChange={setAutoAnalyze} />
-        {autoAnalyze && <AnalysisLevelToggle value={analysis} onChange={setAnalysis} />}
         <Tooltip>
           <TooltipTrigger asChild>
             <span>
@@ -200,9 +171,7 @@ export function DropZone({ serverUrl, onUploaded }: Props) {
               : <>Native drag &amp; drop only available in Tauri shell</>}
           </div>
           <div className="text-xs text-muted-foreground font-mono">
-            {autoAnalyze
-              ? "streamed → /upload · auto-analyzed (~minutes per file)"
-              : "streamed → /binaries — click Import in the panel below to analyze"}
+            streamed → /binaries — click Import in the panel below to analyze
           </div>
         </div>
 
@@ -215,7 +184,7 @@ export function DropZone({ serverUrl, onUploaded }: Props) {
                     <StatusIcon status={j.status} />
                     <div className="flex-1 min-w-0">
                       <div className="text-[13px] font-medium truncate" title={j.path}>{j.name}</div>
-                      <div className="text-[11px] text-muted-foreground truncate font-mono">{statusLabel(j, autoAnalyze)}</div>
+                      <div className="text-[11px] text-muted-foreground truncate font-mono">{statusLabel(j)}</div>
                     </div>
                     {j.status !== "uploading" && (
                       <Tooltip>
@@ -238,93 +207,6 @@ export function DropZone({ serverUrl, onUploaded }: Props) {
   );
 }
 
-function AutoAnalyzeToggle({
-  value,
-  onChange,
-}: {
-  value: boolean;
-  onChange: (v: boolean) => void;
-}) {
-  const opts: { v: boolean; label: string; hint: string }[] = [
-    { v: false, label: "upload only", hint: "Just stream the file into the binaries folder. Faster (no analysis), and you can review before importing. Click Import in the panel below to analyze." },
-    { v: true,  label: "+ analyze",    hint: "Upload AND immediately queue an analyze job. Convenient for one-off imports." },
-  ];
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <div className="inline-flex h-7 rounded-md border bg-muted/30 overflow-hidden text-[11px] font-mono">
-          {opts.map((o) => (
-            <button
-              key={String(o.v)}
-              onClick={() => onChange(o.v)}
-              className={cn(
-                "px-2 transition-colors",
-                value === o.v
-                  ? "bg-primary/15 text-primary border-l border-r border-primary/30 first:border-l-0 last:border-r-0"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-            >
-              {o.label}
-            </button>
-          ))}
-        </div>
-      </TooltipTrigger>
-      <TooltipContent side="bottom" className="max-w-[260px]">
-        <div className="space-y-1 text-[11px]">
-          <div><b>Drop behaviour</b> for new files.</div>
-          <div className="text-muted-foreground">
-            {opts.find((o) => o.v === value)?.hint}
-          </div>
-        </div>
-      </TooltipContent>
-    </Tooltip>
-  );
-}
-
-function AnalysisLevelToggle({
-  value,
-  onChange,
-}: {
-  value: AnalysisLevel;
-  onChange: (v: AnalysisLevel) => void;
-}) {
-  const opts: { v: AnalysisLevel; label: string; hint: string }[] = [
-    { v: "fast",     label: "fast",     hint: "Skip slow decompiler analyzers — best for huge stripped binaries (e.g. macOS frameworks). 3–5× faster." },
-    { v: "normal",   label: "normal",   hint: "Ghidra defaults. Good for most PE/ELF binaries." },
-    { v: "thorough", label: "thorough", hint: "Reserved for future extra analyzers. Same as normal today." },
-  ];
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <div className="inline-flex h-7 rounded-md border bg-muted/30 overflow-hidden text-[11px] font-mono">
-          {opts.map((o) => (
-            <button
-              key={o.v}
-              onClick={() => onChange(o.v)}
-              className={cn(
-                "px-2 transition-colors",
-                value === o.v
-                  ? "bg-primary/15 text-primary border-l border-r border-primary/30 first:border-l-0 last:border-r-0"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-            >
-              {o.label}
-            </button>
-          ))}
-        </div>
-      </TooltipTrigger>
-      <TooltipContent side="bottom" className="max-w-[260px]">
-        <div className="space-y-1 text-[11px]">
-          <div><b>Analysis depth</b> for new uploads.</div>
-          <div className="text-muted-foreground">
-            {opts.find((o) => o.v === value)?.hint}
-          </div>
-        </div>
-      </TooltipContent>
-    </Tooltip>
-  );
-}
-
 function StatusIcon({ status }: { status: UploadJob["status"] }) {
   switch (status) {
     case "uploading":
@@ -339,16 +221,15 @@ function StatusIcon({ status }: { status: UploadJob["status"] }) {
   }
 }
 
-function statusLabel(j: UploadJob, autoAnalyze: boolean): string {
+function statusLabel(j: UploadJob): string {
   if (j.status === "pending") return "queued";
   if (j.status === "uploading" || j.status === "analyzing") {
     const t = j.startedAt ? Math.round((Date.now() - j.startedAt) / 1000) : 0;
-    return autoAnalyze ? `uploading & analyzing… ${t}s` : `uploading… ${t}s`;
+    return `uploading… ${t}s`;
   }
   if (j.status === "done") {
     const dur = j.startedAt && j.finishedAt ? Math.round((j.finishedAt - j.startedAt) / 1000) : 0;
-    const verb = autoAnalyze ? "imported" : "uploaded";
-    return `${verb} · ${dur}s · ${j.message ?? ""}`;
+    return `uploaded · ${dur}s · ${j.message ?? ""}`;
   }
   return `failed: ${j.message ?? "unknown"}`;
 }
