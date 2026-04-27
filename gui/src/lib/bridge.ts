@@ -20,9 +20,18 @@ export const tauri = {
   readResultFile: (path: string, maxChars: number) =>
     invoke<string>("cmd_read_result_file", { path, maxChars }),
 
-  /** POST /upload — server long-polls to completion. analysis: fast | normal | thorough */
-  uploadBinary: (filePath: string, serverUrl: string, analysis: AnalysisLevel = "normal") =>
-    invoke<UploadResult>("cmd_upload_binary", { filePath, serverUrl, analysis }),
+  /**
+   * POST /upload. By default also queues an analyze job (server long-polls).
+   * Set autoAnalyze=false to ONLY land bytes in the /binaries folder; the
+   * user can then trigger an Import explicitly from the binaries panel.
+   */
+  uploadBinary: (
+    filePath: string,
+    serverUrl: string,
+    analysis: AnalysisLevel = "normal",
+    autoAnalyze = true,
+  ) =>
+    invoke<UploadResult>("cmd_upload_binary", { filePath, serverUrl, analysis, autoAnalyze }),
 
   /** POST /import — schedule import for a server-visible binary. */
   importBinary: (serverPath: string, serverUrl: string, analysis: AnalysisLevel = "normal") =>

@@ -155,10 +155,14 @@ pub async fn cmd_read_result_file(path: String, max_chars: usize) -> Result<Stri
 /// internally (history is visible in the Jobs page), but the GUI uses the
 /// simple sync API.
 #[tauri::command]
+// auto_analyze:
+//   false -> stream to /binaries only (server-side analyze=false), no Ghidra work
+//   true  -> upload + analyze in one shot (default)
 pub async fn cmd_upload_binary(
     file_path: String,
     server_url: String,
     analysis: Option<String>,
+    auto_analyze: Option<bool>,
 ) -> Result<UploadEnvelopeData, String> {
     let p = PathBuf::from(&file_path);
     if !p.is_file() {
@@ -171,13 +175,24 @@ pub async fn cmd_upload_binary(
 
     let bytes = tokio::fs::read(&p).await.map_err(|e| err(e.to_string()))?;
 
+    let analyze = auto_analyze.unwrap_or(true);
     let level = analysis.as_deref().unwrap_or("normal");
-    let url = format!(
-        "{}/upload?filename={}&wait=600&analysis={}",
-        server_url.trim_end_matches('/'),
-        urlencode(&name),
-        urlencode(level)
-    );
+    let url = if analyze {
+        format!(
+            "{}/upload?filename={}&wait=600&analysis={}",
+            server_url.trim_end_matches('/'),
+            urlencode(&name),
+            urlencode(level)
+        )
+    } else {
+        // Pure file-drop: server writes the bytes to /binaries and returns immediately
+        // without queuing an analyze job. The user can click Import in the GUI later.
+        format!(
+            "{}/upload?filename={}&analyze=false",
+            server_url.trim_end_matches('/'),
+            urlencode(&name)
+        )
+    };
     // 30-min HTTP timeout to safely cover the 10-min server-side wait + slack.
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(30 * 60))

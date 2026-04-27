@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
-import { Cpu, Layers, X } from "lucide-react";
+import { Cpu, Layers, Loader2, Trash2, X } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { closeProgram, getPrograms } from "@/lib/api";
+import { closeAllPrograms, closeProgram, getPrograms } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import type { ProgramInfo } from "@/lib/types";
 
@@ -17,6 +17,8 @@ interface Props {
 export function ProgramsList({ serverUrl, programs, onChanged }: Props) {
   const [details, setDetails] = useState<ProgramInfo[]>([]);
   const [closing, setClosing] = useState<string | null>(null);
+  const [confirmingAll, setConfirmingAll] = useState(false);
+  const [closingAll, setClosingAll] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -34,6 +36,21 @@ export function ProgramsList({ serverUrl, programs, onChanged }: Props) {
     finally { setClosing(null); }
   };
 
+  const handleCloseAll = async () => {
+    if (!confirmingAll) { setConfirmingAll(true); return; }
+    setClosingAll(true);
+    try { await closeAllPrograms(false, serverUrl); onChanged(); }
+    catch { /* noop */ }
+    finally { setClosingAll(false); setConfirmingAll(false); }
+  };
+
+  // Auto-clear the "are you sure" state after 4 s if the user wanders off.
+  useEffect(() => {
+    if (!confirmingAll) return;
+    const id = window.setTimeout(() => setConfirmingAll(false), 4000);
+    return () => clearTimeout(id);
+  }, [confirmingAll]);
+
   return (
     <Card>
       <CardHeader className="flex-row items-center gap-2 space-y-0 py-3">
@@ -42,6 +59,22 @@ export function ProgramsList({ serverUrl, programs, onChanged }: Props) {
           Loaded programs
           <Badge variant="secondary" className="font-mono text-[10px]">{details.length}</Badge>
         </CardTitle>
+        <span className="flex-1" />
+        {details.length > 0 && (
+          <Button
+            size="sm"
+            variant={confirmingAll ? "destructive" : "outline"}
+            className="h-7 gap-1.5"
+            onClick={handleCloseAll}
+            disabled={closingAll}
+            title="Close every loaded program"
+          >
+            {closingAll
+              ? <Loader2 className="size-3.5 animate-spin" />
+              : <Trash2 className="size-3.5" />}
+            {confirmingAll ? `Click again to close all ${details.length}` : "Close all"}
+          </Button>
+        )}
       </CardHeader>
 
       <CardContent>

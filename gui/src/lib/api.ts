@@ -51,3 +51,25 @@ export async function closeProgram(
     timeoutMs: 10_000,
   });
 }
+
+export interface CloseAllResult {
+  closed: string[];
+  closed_count: number;
+  remaining: string[];
+}
+
+export async function closeAllPrograms(
+  keepCurrent = false,
+  server = getServerUrl()
+): Promise<CloseAllResult> {
+  const r = await jsonFetch<{ status: string; data: CloseAllResult }>(
+    `${server}/program/close-all`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ keep_current: keepCurrent ? "true" : "false" }),
+      timeoutMs: 60_000,
+    }
+  );
+  return r.data;
+}
