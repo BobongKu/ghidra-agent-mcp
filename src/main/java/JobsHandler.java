@@ -102,6 +102,4 @@ public class JobsHandler {
         return Math.max(0, Math.min(requested, max));
     }
 
-    @SuppressWarnings("unused")
-    private static List<String> nothing() { return List.of(); } // placate compiler order
 }

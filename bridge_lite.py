@@ -7,11 +7,8 @@ Ghidra Analyzer MCP Bridge
 """
 
 import os
-import sys
 import json
 import logging
-import hashlib
-import time
 from datetime import datetime
 from pathlib import Path
 import httpx
