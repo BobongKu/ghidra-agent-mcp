@@ -1,0 +1,111 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * shadcn/ui CSS variables — Ghidra-flavored dark theme
+ * (Light theme included for completeness even though we always use .dark on root)
+ */
+@layer base {
+  :root {
+    /* shadcn core (light) */
+    --background: 0 0% 100%;
+    --foreground: 240 10% 3.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 3.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 10% 3.9%;
+    --primary: 218 41% 49%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 240 4.8% 95.9%;
+    --secondary-foreground: 240 5.9% 10%;
+    --muted: 240 4.8% 95.9%;
+    --muted-foreground: 240 3.8% 46.1%;
+    --accent: 240 4.8% 95.9%;
+    --accent-foreground: 240 5.9% 10%;
+    --destructive: 0 56% 60%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 5.9% 90%;
+    --input: 240 5.9% 90%;
+    --ring: 218 41% 49%;
+    --radius: 0.25rem;
+
+    /* domain accents */
+    --success: 95 19% 44%;
+    --success-foreground: 0 0% 100%;
+    --warning: 25 60% 50%;
+    --warning-foreground: 0 0% 100%;
+    --info: 218 41% 55%;
+    --info-foreground: 0 0% 100%;
+
+    /* code coloring */
+    --code-key:     25 60% 50%;
+    --code-string:  95 19% 44%;
+    --code-number:  17 53% 62%;
+    --code-keyword: 279 21% 56%;
+  }
+
+  .dark {
+    /* Black + Red — crimson on jet */
+    --background: 0 0% 4%;              /* #0a0a0a near-black */
+    --foreground: 0 0% 95%;              /* #f2f2f2 */
+    --card: 0 0% 8%;                    /* #141414 */
+    --card-foreground: 0 0% 95%;
+    --popover: 0 0% 6%;                 /* #0f0f0f */
+    --popover-foreground: 0 0% 95%;
+    --primary: 0 72% 51%;               /* #dc2626 red-600 */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 0 0% 13%;              /* #212121 */
+    --secondary-foreground: 0 0% 95%;
+    --muted: 0 0% 11%;                  /* #1c1c1c */
+    --muted-foreground: 0 0% 60%;       /* #999999 */
+    --accent: 0 55% 22%;                /* #571616 dark crimson */
+    --accent-foreground: 0 0% 95%;
+    --destructive: 0 84% 60%;           /* #ef4444 red-500 */
+    --destructive-foreground: 0 0% 100%;
+    --border: 0 0% 18%;                 /* #2e2e2e */
+    --input: 0 0% 11%;                  /* #1c1c1c */
+    --ring: 0 72% 51%;                  /* #dc2626 — matches primary */
+
+    /* domain accents (kept distinguishable) */
+    --success: 95 35% 48%;              /* #76a850 punchier green for contrast on black */
+    --success-foreground: 0 0% 100%;
+    --warning: 35 90% 55%;              /* #f29127 amber */
+    --warning-foreground: 0 0% 0%;
+    --info: 0 72% 55%;                  /* matches primary red */
+    --info-foreground: 0 0% 100%;
+
+    /* code coloring — red-anchored palette */
+    --code-key:     0 75% 60%;          /* #ef5454 red — function/key emphasis */
+    --code-string:  35 90% 60%;         /* #f4a236 amber — strings */
+    --code-number:  30 70% 58%;         /* #df9842 orange — numbers */
+    --code-keyword: 280 70% 75%;        /* #cf9ee5 violet — bool/null */
+  }
+}
+
+@layer base {
+  * { @apply border-border; }
+  html, body, #root { height: 100%; }
+  body {
+    @apply bg-background text-foreground antialiased font-sans;
+    font-feature-settings: "kern", "liga", "calt";
+  }
+  ::-webkit-scrollbar { width: 12px; height: 12px; }
+  ::-webkit-scrollbar-track { background: hsl(var(--muted)); }
+  ::-webkit-scrollbar-thumb { background: hsl(var(--accent)); }
+  ::-webkit-scrollbar-thumb:hover { background: hsl(var(--accent) / 0.85); }
+  ::-webkit-scrollbar-corner { background: hsl(var(--muted)); }
+  ::selection { background: hsl(var(--primary) / 0.45); color: hsl(var(--foreground)); }
+  input, button, select, textarea { font: inherit; color: inherit; }
+}
+
+/* tiny global utility classes that survive the migration */
+@layer components {
+  .mono { @apply font-mono text-[12.5px]; }
+  /* status dot — flat square with glow, color comes from text-* */
+  .dot {
+    @apply inline-block w-2 h-2;
+    background-color: currentColor;
+    box-shadow: 0 0 6px currentColor;
+  }
+}

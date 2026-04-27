@@ -3,16 +3,25 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile
+    # Bind to localhost on the host by default. The Ghidra server accepts
+    # arbitrary file uploads, so do NOT expose it to other machines without
+    # a deliberate reason. To bind on all interfaces, override:
+    #   ports:
+    #     - "0.0.0.0:18089:8089"
     ports:
-      - "18089:8089"
+      - "127.0.0.1:18089:8089"
     volumes:
       - ./binaries:/binaries        # Binary files to analyze
       - ghidra-data:/data            # Ghidra project storage
       # - ./extensions:/extensions   # Optional: Ghidra extensions
     environment:
       - GHIDRA_MCP_PORT=8089
+      # Container-internal bind. Stays 0.0.0.0 so Docker's port mapping can
+      # forward; host exposure is restricted by the `ports:` line above.
       - BIND_ADDRESS=0.0.0.0
       - AUTO_IMPORT=false
+      # Default upload cap: 1 GiB. Override only if you intend to upload bigger.
+      # - GHIDRA_MAX_UPLOAD_BYTES=1073741824
     mem_limit: 4g
     restart: unless-stopped
 

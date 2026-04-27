@@ -444,7 +444,12 @@ def _handler({sig}) -> str:
 
 STATIC_TOOL_NAMES = {"health", "upload_binary", "import_binary", "decompile_function",
                      "dependency_tree", "dependency_summary", "match_imports_exports",
-                     "read_result", "list_results"}
+                     "read_result", "list_results",
+                     # Job tracking + cross-program search + batch import
+                     "list_jobs", "get_job", "find_function",
+                     "search_strings", "search_symbols", "batch_import_directory",
+                     # Schema-derived dynamic tools that we override above
+                     "search", "jobs"}
 
 
 @mcp.tool(name="read_result",
@@ -594,6 +599,152 @@ def match_imports_exports(program_a: str, program_b: str, return_context: str = 
     return _format_result(
         ghidra_request("POST", "/deps/match", body={"program_a": program_a, "program_b": program_b}),
         tool_name="deps_match", return_context=rc, request_program=program_a)
+
+
+# ==================== Job tracking ====================
+
+@mcp.tool(name="list_jobs",
+          description="List recent import/analyze jobs (newest first).\n"
+                      "Use this to check the state of background analyses started by upload_binary or import_binary.\n"
+                      "Parameters:\n"
+                      "  - limit: Max number of jobs to return (default 20, max 200)")
+def list_jobs(limit: str = "20") -> str:
+    try:
+        n = max(1, min(int(limit), 200))
+    except (TypeError, ValueError):
+        n = 20
+    return _format_result(ghidra_request("GET", "/jobs", params={"limit": str(n)}),
+                          tool_name="jobs")
+
+
+@mcp.tool(name="get_job",
+          description="Fetch a single job's state. Optional long-poll until terminal.\n"
+                      "Parameters:\n"
+                      "  - job_id: UUID returned from upload_binary / import_binary (required)\n"
+                      "  - wait: Seconds to long-poll for terminal state (default 0 = no wait, max 1800)")
+def get_job(job_id: str, wait: str = "0") -> str:
+    try:
+        w = max(0, min(int(wait), 1800))
+    except (TypeError, ValueError):
+        w = 0
+    return _format_result(ghidra_request("GET", f"/jobs/{job_id}", params={"wait": str(w)}),
+                          tool_name="job")
+
+
+# ==================== Cross-program search ====================
+
+@mcp.tool(name="find_function",
+          description="Find a function by name across ALL loaded programs.\n"
+                      "Returns matching internal and external functions with program, address, and library.\n"
+                      "Use this instead of guessing which binary contains a given function.\n"
+                      "Parameters:\n"
+                      "  - name: Function name substring to match (case-insensitive by default, required)\n"
+                      "  - case_sensitive: Set 'true' for exact-case matching\n"
+                      "  - limit: Max results (default 100, max 1000)")
+def find_function(name: str, case_sensitive: str = "", limit: str = "100") -> str:
+    params = {"q": name, "type": "function", "limit": str(limit)}
+    if case_sensitive.lower() in ("true", "1", "yes"):
+        params["case"] = "true"
+    return _format_result(ghidra_request("GET", "/search", params=params),
+                          tool_name="search")
+
+
+@mcp.tool(name="search_strings",
+          description="Search defined strings across ALL loaded programs.\n"
+                      "Returns matches with program name, address, and string value.\n"
+                      "Parameters:\n"
+                      "  - query: Substring to find (case-insensitive by default, required)\n"
+                      "  - case_sensitive: Set 'true' for exact-case matching\n"
+                      "  - limit: Max results (default 100, max 1000)")
+def search_strings(query: str, case_sensitive: str = "", limit: str = "100") -> str:
+    params = {"q": query, "type": "string", "limit": str(limit)}
+    if case_sensitive.lower() in ("true", "1", "yes"):
+        params["case"] = "true"
+    return _format_result(ghidra_request("GET", "/search", params=params),
+                          tool_name="search")
+
+
+@mcp.tool(name="search_symbols",
+          description="Search symbols (labels, functions, data) across ALL loaded programs.\n"
+                      "Parameters:\n"
+                      "  - query: Substring to find (required)\n"
+                      "  - case_sensitive: Set 'true' for exact-case matching\n"
+                      "  - limit: Max results (default 100, max 1000)")
+def search_symbols(query: str, case_sensitive: str = "", limit: str = "100") -> str:
+    params = {"q": query, "type": "symbol", "limit": str(limit)}
+    if case_sensitive.lower() in ("true", "1", "yes"):
+        params["case"] = "true"
+    return _format_result(ghidra_request("GET", "/search", params=params),
+                          tool_name="search")
+
+
+# ==================== Batch import ====================
+
+@mcp.tool(name="batch_import_directory",
+          description="Queue every binary in a server-visible directory for import.\n"
+                      "Each file becomes a background job; analysis runs sequentially in one worker.\n"
+                      "Returns the list of job_ids — poll get_job(job_id, wait=60) for progress.\n"
+                      "Parameters:\n"
+                      "  - directory: Directory inside the server (default /binaries)\n"
+                      "  - pattern: Glob-ish suffix filter (default '' = all files; e.g. '.exe', '.dll')\n"
+                      "  - limit: Max files to enqueue (default 50)")
+def batch_import_directory(directory: str = "/binaries", pattern: str = "", limit: str = "50") -> str:
+    try:
+        n = max(1, min(int(limit), 200))
+    except (TypeError, ValueError):
+        n = 50
+
+    # Reuse /health to confirm server visibility of binaries dir; fall back to listing via os.
+    h = ghidra_request("GET", "/health")
+    if h.get("status") != "ok":
+        return _format_result(h, tool_name="batch_import_directory")
+
+    server_binaries_dir = h.get("data", {}).get("binaries_dir", "/binaries")
+    use_server_listing = (directory == server_binaries_dir or directory == "/binaries")
+    files: list[str] = []
+    if use_server_listing:
+        files = h.get("data", {}).get("available_binaries", []) or []
+    else:
+        try:
+            files = [f for f in os.listdir(directory)
+                     if os.path.isfile(os.path.join(directory, f))]
+        except Exception as e:
+            return json.dumps({"status": "error", "message": f"cannot list {directory}: {e}"})
+
+    if pattern:
+        suffix = pattern.lower().lstrip("*")
+        files = [f for f in files if f.lower().endswith(suffix)]
+    files = files[:n]
+
+    submitted = []
+    for fname in files:
+        path = directory.rstrip("/") + "/" + fname
+        resp = ghidra_request("POST", "/import",
+                              params={"wait": "0"},
+                              body={"path": path})
+        if resp.get("status") == "ok":
+            d = resp.get("data", {})
+            submitted.append({
+                "file": fname,
+                "job_id": d.get("job_id"),
+                "status": d.get("status"),
+            })
+        else:
+            submitted.append({
+                "file": fname,
+                "error": resp.get("message", "unknown"),
+            })
+
+    return _format_result({
+        "status": "ok",
+        "data": {
+            "directory": directory,
+            "pattern": pattern,
+            "submitted": submitted,
+            "count": len(submitted),
+            "hint": "Poll list_jobs() or get_job(job_id, wait=60) for progress.",
+        }
+    }, tool_name="batch_import_directory")
 
 
 # ==================== MAIN ====================

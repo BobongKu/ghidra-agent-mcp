@@ -15,15 +15,27 @@ public class ListingHandler {
     public void handleImports(HttpExchange ex) throws Exception {
         var params = ctx.parseQuery(ex);
         Program p = ctx.resolveProgram(params);
+        // Cap to avoid materialising huge per-library function lists in memory.
+        int perLib = Math.max(0, Math.min(ctx.intParam(params, "limit_per_lib", 200), 5000));
 
         ctx.sendOk(ex, ctx.withRead(() -> {
             var extMgr = p.getExternalManager();
             var result = new ArrayList<Map<String, Object>>();
             for (String libName : extMgr.getExternalLibraryNames()) {
                 var funcs = new ArrayList<String>();
+                int total = 0;
                 var it = extMgr.getExternalLocations(libName);
-                while (it.hasNext()) funcs.add(it.next().getLabel());
-                result.add(Map.of("library", libName, "count", funcs.size(), "functions", funcs));
+                while (it.hasNext()) {
+                    String label = it.next().getLabel();
+                    total++;
+                    if (funcs.size() < perLib) funcs.add(label);
+                }
+                var entry = new LinkedHashMap<String, Object>();
+                entry.put("library", libName);
+                entry.put("count", total);
+                entry.put("functions", funcs);
+                if (total > funcs.size()) entry.put("truncated", true);
+                result.add(entry);
             }
             return result;
         }));

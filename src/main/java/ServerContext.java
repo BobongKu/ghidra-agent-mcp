@@ -29,9 +29,19 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 public class ServerContext {
 
     final Map<String, Program> programs = new ConcurrentHashMap<>();
-    volatile Program currentProgram;
+    /**
+     * Guarded by {@link #stateLock}. Mutations + read-and-modify sequences must
+     * use {@link #setCurrentProgram(Program)} or hold {@code stateLock} explicitly
+     * to avoid TOCTOU races (e.g. closing a program then someone re-reads the
+     * stale reference).
+     */
+    private volatile Program currentProgram;
+    final Object stateLock = new Object();
     final ReadWriteLock rwLock = new ReentrantReadWriteLock();
     final Gson gson = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
+
+    /** Background worker that runs all import/analysis jobs. */
+    final JobManager jobManager = new JobManager();
 
     GhidraProject project;
     String binariesDir = "/binaries";
@@ -192,20 +202,100 @@ public class ServerContext {
         Object nameObj = params.get("program");
         String name = nameObj != null ? nameObj.toString() : null;
         if (name != null && !name.isBlank()) {
-            Program p = programs.get(name);
-            if (p != null) return p;
-            for (var entry : programs.entrySet()) {
+            // Snapshot the keys at the moment of the lookup so concurrent imports
+            // don't cause a CME during iteration.
+            var snapshot = new ArrayList<>(programs.entrySet());
+            for (var entry : snapshot) {
+                if (entry.getKey().equals(name)) return entry.getValue();
+            }
+            for (var entry : snapshot) {
                 if (entry.getKey().equalsIgnoreCase(name)) return entry.getValue();
             }
-            for (var entry : programs.entrySet()) {
+            for (var entry : snapshot) {
                 if (entry.getKey().toLowerCase().contains(name.toLowerCase())) return entry.getValue();
             }
-            throw new IllegalArgumentException("Program not found: '" + name + "'. Available: " + String.join(", ", programs.keySet()));
+            // Truncate the available list so we don't blow up the error response when
+            // many programs are loaded.
+            var keys = new ArrayList<String>();
+            for (var e : snapshot) { if (keys.size() == 12) { keys.add("…"); break; } keys.add(e.getKey()); }
+            throw new IllegalArgumentException("Program not found: '" + name + "'. Available: " + String.join(", ", keys));
         }
-        if (currentProgram == null) {
+        Program cp = currentProgram;
+        if (cp == null) {
             throw new IllegalStateException("No program loaded. Use /upload or /import first.");
         }
-        return currentProgram;
+        return cp;
+    }
+
+    // ========== currentProgram accessors (state lock) ==========
+
+    public Program getCurrentProgram() { return currentProgram; }
+
+    /**
+     * Atomically swap currentProgram. Use this instead of direct field assignment.
+     * Holds {@link #stateLock} so concurrent program close/open don't interleave.
+     */
+    public void setCurrentProgram(Program p) {
+        synchronized (stateLock) { currentProgram = p; }
+    }
+
+    /**
+     * Remove a program by name. If it was current, fall back to any remaining program.
+     * Returns the removed Program (or null if not found).
+     */
+    public Program removeProgram(String name) {
+        Program p;
+        synchronized (stateLock) {
+            p = programs.remove(name);
+            if (p == null) {
+                // case-insensitive retry — search and remove the matching key
+                for (var key : new ArrayList<>(programs.keySet())) {
+                    if (key.equalsIgnoreCase(name)) { p = programs.remove(key); break; }
+                }
+                if (p == null) return null;
+            }
+            if (p == currentProgram) {
+                currentProgram = programs.isEmpty() ? null : programs.values().iterator().next();
+            }
+        }
+        // Best-effort: drop the persisted DomainFile so a server restart does not
+        // resurrect the program. Ignore failures (the map removal is the source of truth).
+        try {
+            var df = p.getDomainFile();
+            if (df != null && df.canSave()) df.delete();
+        } catch (Exception e) {
+            System.err.println("[persist] delete failed for " + name + ": " + e.getMessage());
+        }
+        return p;
+    }
+
+    /** Atomically close all programs, optionally preserving the current one. */
+    public List<String> closeAllPrograms(boolean keepCurrent) {
+        var dropped = new ArrayList<Program>();
+        List<String> closed;
+        synchronized (stateLock) {
+            closed = new ArrayList<>();
+            var it = programs.entrySet().iterator();
+            while (it.hasNext()) {
+                var entry = it.next();
+                if (keepCurrent && entry.getValue() == currentProgram) continue;
+                entry.getValue().setTemporary(true);
+                closed.add(entry.getKey());
+                dropped.add(entry.getValue());
+                it.remove();
+            }
+            if (!keepCurrent || !programs.containsValue(currentProgram)) {
+                currentProgram = programs.isEmpty() ? null : programs.values().iterator().next();
+            }
+        }
+        // Drop persisted files outside the lock.
+        for (Program p : dropped) {
+            try {
+                var df = p.getDomainFile();
+                if (df != null && df.canSave()) df.delete();
+            } catch (Exception ignored) {}
+        }
+        return closed;
     }
 
     public Address toAddress(Program prog, String addr) {
@@ -313,31 +403,114 @@ public class ServerContext {
         return sb.toString();
     }
 
-    /** Import a file and start auto-analysis. Thread-safe. */
-    public synchronized Program importAndAnalyze(File file) throws Exception {
+    /**
+     * Import a file and run auto-analysis to completion. Long-running.
+     *
+     * <p>This is intended to be called only from the {@link JobManager} worker
+     * thread, which already serialises concurrent imports. The previous
+     * {@code synchronized} keyword was removed because (a) it would have starved
+     * HTTP threads when the lock was held for many minutes, and (b) the worker
+     * thread provides equivalent serialisation. If you need to call this from
+     * elsewhere, do it via {@code ctx.jobManager.submit(...)}.
+     */
+    public Program importAndAnalyze(File file) throws Exception {
         String fileName = file.getName();
-        Program existing = programs.get(fileName);
-        if (existing != null) return existing;
-        for (Program p : programs.values()) {
-            if (p.getName().equalsIgnoreCase(fileName)) return p;
+        // Fast path under stateLock: if already loaded, return the existing reference.
+        synchronized (stateLock) {
+            Program existing = programs.get(fileName);
+            if (existing != null) return existing;
+            for (Program p : programs.values()) {
+                if (p.getName().equalsIgnoreCase(fileName)) return p;
+            }
         }
 
         Program prog = project.importProgram(file);
         if (prog == null) throw new RuntimeException("Import failed for: " + file.getName());
 
-        programs.put(prog.getName(), prog);
-        if (currentProgram == null) currentProgram = prog;
-
+        // Configure & run analysis OUTSIDE of stateLock — it's a long operation.
         var mgr = ghidra.app.plugin.core.analysis.AutoAnalysisManager.getAnalysisManager(prog);
         mgr.initializeOptions();
-
-        // Disable analyzers that fail in headless mode (no script directories)
         var options = prog.getOptions("Analyzers");
+        // Disable analyzers that fail in headless mode (no script directories)
         options.setBoolean("Windows Resource Reference Analyzer", false);
-
         mgr.reAnalyzeAll(null);
-        mgr.startAnalysis(TaskMonitor.DUMMY);
+        try {
+            mgr.startAnalysis(TaskMonitor.DUMMY);
+        } catch (Exception e) {
+            // Analysis failure: don't register the half-baked program.
+            try { prog.setTemporary(true); } catch (Exception ignored) {}
+            throw e;
+        }
+
+        // Persist via GhidraProject.saveAs which is the documented API for
+        // attaching an in-memory DomainObject to a folder. This path tolerates
+        // the AutoAnalysisManager's lingering listeners better than direct
+        // DomainFolder.createFile.
+        try {
+            prog.flushEvents();
+            var root = project.getProject().getProjectData().getRootFolder();
+            var name = prog.getName();
+            var existing = root.getFile(name);
+            if (existing != null) {
+                try { existing.delete(); } catch (Exception ignored) {}
+            }
+            project.saveAs(prog, root.getPathname(), name, true);
+            System.out.println("[persist] saved " + name);
+        } catch (Exception e) {
+            System.err.println("[persist] save failed for " + prog.getName() + ": " + e.getMessage());
+        }
+
+        // Publish to the program map only after analysis succeeded.
+        synchronized (stateLock) {
+            programs.put(prog.getName(), prog);
+            if (currentProgram == null) currentProgram = prog;
+        }
         return prog;
+    }
+
+    /**
+     * Walk the on-disk Ghidra project's domain folders and re-open every saved
+     * Program. Called once at server startup.
+     */
+    public void restoreProjectPrograms() {
+        if (project == null) {
+            System.out.println("[restore] no project — skip");
+            return;
+        }
+        try {
+            var root = project.getProject().getProjectData().getRootFolder();
+            int fileCount = root.getFiles().length;
+            int folderCount = root.getFolders().length;
+            System.out.println("[restore] scan root: " + fileCount + " files, " + folderCount + " subfolders");
+            restoreFolder(root);
+        } catch (Exception e) {
+            System.err.println("[restore] failed: " + e.getMessage());
+        }
+    }
+
+    private void restoreFolder(ghidra.framework.model.DomainFolder folder) {
+        if (programs.size() >= maxPrograms) return;
+        for (var df : folder.getFiles()) {
+            System.out.println("[restore] candidate " + df.getName() + " (type=" + df.getContentType() + ")");
+            try {
+                if (programs.size() >= maxPrograms) {
+                    System.out.println("[restore] reached max-programs limit");
+                    return;
+                }
+                if (!"Program".equals(df.getContentType())) continue;
+                Program p = (Program) df.getDomainObject(this, true, false, TaskMonitor.DUMMY);
+                if (p == null) continue;
+                synchronized (stateLock) {
+                    programs.put(p.getName(), p);
+                    if (currentProgram == null) currentProgram = p;
+                }
+                System.out.println("[restore] " + p.getName()
+                    + " (" + p.getFunctionManager().getFunctionCount() + " fns)");
+            } catch (Exception e) {
+                System.err.println("[restore] " + df.getName() + ": " + e.getMessage());
+            }
+        }
+        for (var sub : folder.getFolders()) restoreFolder(sub);
     }
 }
 

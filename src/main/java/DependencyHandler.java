@@ -44,14 +44,31 @@ public class DependencyHandler {
         }));
     }
 
+    /** Max depth allowed for /deps/tree to bound stack frames + response size. */
+    private static final int DEPS_TREE_MAX_DEPTH = 50;
+    private static final int DEPS_TREE_DEFAULT_DEPTH = 10;
+
     public void handleDepsTree(HttpExchange ex) throws Exception {
         var body = ctx.parseRequest(ex);
         Program p = ctx.resolveProgram(body);
         boolean summary = "true".equalsIgnoreCase(String.valueOf(body.getOrDefault("summary", "false")));
-        ctx.sendOk(ex, ctx.withRead(() -> buildDependencyTree(p, new HashSet<>(), summary)));
+        int reqDepth = ctx.intParam(body, "max_depth", DEPS_TREE_DEFAULT_DEPTH);
+        int maxDepth = Math.min(Math.max(0, reqDepth), DEPS_TREE_MAX_DEPTH);
+        ctx.sendOk(ex, ctx.withRead(() -> buildDependencyTree(p, new HashSet<>(), summary, maxDepth)));
     }
 
-    private Map<String, Object> buildDependencyTree(Program prog, Set<String> visited, boolean summary) {
+    /**
+     * Walk the dependency graph rooted at {@code prog}.
+     *
+     * <p>Two safety bounds:
+     * <ol>
+     *   <li>{@code visited} prevents revisiting the same library — guards true cycles.</li>
+     *   <li>{@code depthRemaining} stops descent at {@link #DEPS_TREE_MAX_DEPTH} levels;
+     *       even with cycles broken, a long linear chain shouldn't blow the stack
+     *       or response size.</li>
+     * </ol>
+     */
+    private Map<String, Object> buildDependencyTree(Program prog, Set<String> visited, boolean summary, int depthRemaining) {
         String name = prog.getName();
         String key = name.toLowerCase();
 
@@ -63,6 +80,7 @@ public class DependencyHandler {
         var children = new ArrayList<Map<String, Object>>();
         var unresolved = new ArrayList<String>();
         int importFuncCount = 0;
+        boolean depthCapped = false;
 
         for (String lib : prog.getExternalManager().getExternalLibraryNames()) {
             var it = prog.getExternalManager().getExternalLocations(lib);
@@ -77,7 +95,12 @@ public class DependencyHandler {
             }
 
             if (dep != null) {
-                children.add(buildDependencyTree(dep, visited, summary));
+                if (depthRemaining > 0) {
+                    children.add(buildDependencyTree(dep, visited, summary, depthRemaining - 1));
+                } else {
+                    depthCapped = true;
+                    children.add(Map.of("name", dep.getName(), "depth_capped", true));
+                }
             } else {
                 unresolved.add(summary ? lib + " (" + libFuncCount + " imports)" : lib);
             }
@@ -87,6 +110,7 @@ public class DependencyHandler {
         result.put("name", name);
         result.put("format", prog.getExecutableFormat());
         result.put("children", children);
+        if (depthCapped) result.put("depth_capped", true);
         if (!summary) {
             result.put("unresolved", unresolved);
         } else {
@@ -243,7 +267,8 @@ public class DependencyHandler {
         String exporterName = req.getOrDefault("exporter", "").toString();
         this.ctx.sendOk(ex, this.ctx.withRead(() -> {
             ArrayList<Map<String, Object>> importedBy = new ArrayList<Map<String, Object>>();
-            for (Map.Entry<String, Program> entry : this.ctx.programs.entrySet()) {
+            // Snapshot to avoid CME if a concurrent import mutates programs.
+            for (Map.Entry<String, Program> entry : new ArrayList<>(this.ctx.programs.entrySet())) {
                 Program p = entry.getValue();
                 if (p.getName().equalsIgnoreCase(exporterName)) continue;
                 for (String lib : p.getExternalManager().getExternalLibraryNames()) {
@@ -280,7 +305,7 @@ public class DependencyHandler {
         this.ctx.sendOk(ex, this.ctx.withRead(() -> {
             ArrayList<Map<String, Object>> nodes = new ArrayList<Map<String, Object>>();
             ArrayList<Map<String, Object>> edges = new ArrayList<Map<String, Object>>();
-            for (Map.Entry<String, Program> entry : this.ctx.programs.entrySet()) {
+            for (Map.Entry<String, Program> entry : new ArrayList<>(this.ctx.programs.entrySet())) {
                 Program program = entry.getValue();
                 nodes.add(Map.of("name", program.getName(), "format", program.getExecutableFormat(), "functions", program.getFunctionManager().getFunctionCount()));
                 for (String lib : program.getExternalManager().getExternalLibraryNames()) {
@@ -314,7 +339,7 @@ public class DependencyHandler {
     public void handleDepsUnresolved(HttpExchange ex) throws Exception {
         this.ctx.sendOk(ex, this.ctx.withRead(() -> {
             ArrayList<Map<String, Object>> result = new ArrayList<Map<String, Object>>();
-            for (Map.Entry<String, Program> entry : this.ctx.programs.entrySet()) {
+            for (Map.Entry<String, Program> entry : new ArrayList<>(this.ctx.programs.entrySet())) {
                 Program p = entry.getValue();
                 ArrayList<Map<String, Object>> unresolved = new ArrayList<Map<String, Object>>();
                 int totalImports = 0;

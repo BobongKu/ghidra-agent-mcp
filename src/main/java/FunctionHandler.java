@@ -60,14 +60,18 @@ public class FunctionHandler {
         ctx.sendOk(ex, ctx.withRead(() -> {
             Function f = ctx.resolveFunction(p, addr);
             if (f == null) throw new IllegalArgumentException("No function found for: '" + addr + "'");
+            // Note: openProgram() is moved INSIDE the try so dispose() always runs,
+            // even if openProgram throws or decompileFunction itself fails.
             DecompInterface decomp = new DecompInterface();
-            decomp.openProgram(p);
             try {
+                decomp.openProgram(p);
                 var res = decomp.decompileFunction(f, 60, TaskMonitor.DUMMY);
-                String code = res.getDecompiledFunction() != null ?
+                String code = (res != null && res.getDecompiledFunction() != null) ?
                     res.getDecompiledFunction().getC() : "Decompilation failed";
                 return Map.of("function", f.getName(), "address", f.getEntryPoint().toString(), "decompiled", code);
-            } finally { decomp.dispose(); }
+            } finally {
+                try { decomp.dispose(); } catch (Throwable ignored) {}
+            }
         }));
     }
 

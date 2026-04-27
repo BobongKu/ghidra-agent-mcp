@@ -1,4 +1,5 @@
 {
+  "_comment": "Copy to .mcp.json and fill in any optional credentials. The Ghidra bridge itself needs no secrets — only the optional tooling MCPs (Figma / pixelforge / etc.) do.",
   "mcpServers": {
     "ghidra-agent-mcp": {
       "command": "python",

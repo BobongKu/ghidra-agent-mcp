@@ -1,0 +1,67 @@
+ghidra-agent-mcp 1.0.0 — Portable bundle
+==========================================
+
+PREREQUISITES
+  - Windows 10 21H2+ / Windows 11 x64
+  - Docker Desktop (running, WSL2 backend recommended)
+  - Microsoft Edge WebView2 Runtime
+      Pre-installed on Win11 and recent Win10 builds.
+      If the GUI window is blank, install from:
+      https://developer.microsoft.com/microsoft-edge/webview2/
+  - (LLM use only) Python 3.10+
+
+QUICK START — GUI ONLY (no LLM)
+  1. Double-click start.cmd
+       (first run downloads Ghidra ~400 MB and builds the image, ~3-5 min)
+  2. The GUI opens. Drag a binary onto the dashboard, watch it analyze.
+  3. When done: double-click stop.cmd
+       (project state is preserved between runs in the ghidra-data volume)
+
+QUICK START — WITH LLM (Claude / Cursor / etc.)
+  1. Double-click start.cmd (server up).
+  2. Double-click setup-mcp.cmd
+       Installs the Python MCP bridge and prints a config snippet with
+       absolute paths already filled in.
+  3. Paste the snippet into your LLM client's MCP config:
+       Claude Desktop : %APPDATA%\Claude\claude_desktop_config.json
+       Claude Code    : .mcp.json in your project root
+                        (or run: setup-mcp.cmd -WriteLocal)
+       Cursor         : %USERPROFILE%\.cursor\mcp.json
+  4. Restart the LLM client. The agent now has reverse-engineering tools.
+
+NOTES
+  - First time you run ghidra-agent-gui.exe Windows SmartScreen may warn
+    "Windows protected your PC" because the exe is unsigned. Click
+    "More info" -> "Run anyway".
+  - .ps1 scripts can also be run directly via right-click -> Run with
+    PowerShell, but the .cmd wrappers are easier and bypass the
+    PowerShell execution policy automatically.
+
+TROUBLESHOOTING
+  - Red "Cannot reach server" banner in GUI:
+      Docker Desktop is not running, or the container failed to start.
+      Logs:  docker compose -f docker\docker-compose.yml logs -f
+  - Port 18089 already in use:
+      Edit docker\docker-compose.yml, change "127.0.0.1:18089:8089"
+      to a free port, then update Server URL in the GUI Settings page.
+  - First-run build is slow:
+      The Docker image needs to download Ghidra (one-time, ~400 MB).
+      Subsequent starts are instant — the image is cached.
+  - GUI window is blank / white:
+      Install WebView2 Runtime (link above).
+
+WHAT'S IN THIS BUNDLE
+  ghidra-agent-gui.exe   Desktop GUI (Tauri, ~16 MB)
+  start.cmd / .ps1       Start container + open GUI
+  stop.cmd / .ps1        Stop container (state preserved)
+  setup-mcp.cmd / .ps1   Configure LLM bridge
+  docker/                Compose file + Dockerfile + pre-built JAR
+  bridge_lite.py         Python MCP bridge (LLM connector)
+  requirements.txt       Python deps for the bridge (mcp + httpx)
+  .mcp.json.example      Template MCP config
+
+DOCS
+  README.md       Full project README (architecture, all features)
+  CHANGELOG.md    Release notes
+  LICENSE         Apache-2.0
+  ATTRIBUTION.md  Third-party software credits

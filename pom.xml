@@ -6,6 +6,9 @@
     <groupId>com.ghidraagent</groupId>
     <artifactId>ghidra-agent-mcp</artifactId>
     <version>1.0.0</version>
+    <!-- Single source of truth for product version. Bumped on user-visible changes. -->
+    <!-- Aligned with: gui/package.json, gui/src-tauri/Cargo.toml, gui/src-tauri/tauri.conf.json,
+         src/main/java/ProgramHandler.java (handleHealth → "version"), bridge_lite.py header. -->
     <packaging>jar</packaging>
     <name>Ghidra Agent MCP</name>
 

@@ -61,38 +61,58 @@ public class CallGraphHandler {
         }
     }
 
+    /** Hard cap for /callgraph/full edges to prevent unbounded heap growth. */
+    private static final int CALLGRAPH_FULL_MAX_LIMIT = 50_000;
+
     public void handleCallGraphFull(HttpExchange ex) throws Exception {
         var params = ctx.parseQuery(ex);
         Program p = ctx.resolveProgram(params);
-        int limit = ctx.intParam(params, "limit", 1000);
+        int requested = ctx.intParam(params, "limit", 1000);
+        int limit = Math.max(1, Math.min(requested, CALLGRAPH_FULL_MAX_LIMIT));
         String format = params.getOrDefault("format", "json");
 
         ctx.sendOk(ex, ctx.withRead(() -> {
             var edges = new ArrayList<Map<String, String>>();
+            boolean hasMore = false;
             var funcIt = p.getFunctionManager().getFunctions(true);
-            while (funcIt.hasNext() && edges.size() < limit) {
+            outer:
+            while (funcIt.hasNext()) {
                 Function f = funcIt.next();
                 for (var ref : ctx.getCallRefsFrom(p, f)) {
                     Function callee = p.getFunctionManager().getFunctionAt(ref.getToAddress());
-                    if (callee != null) {
-                        edges.add(Map.of("from", f.getName(), "to", callee.getName()));
-                        if (edges.size() >= limit) break;
+                    if (callee == null) continue;
+                    if (edges.size() >= limit) {
+                        hasMore = true;
+                        break outer;
                     }
+                    edges.add(Map.of("from", f.getName(), "to", callee.getName()));
                 }
             }
             if ("mermaid".equalsIgnoreCase(format)) {
                 return Map.of("format", "mermaid", "count", edges.size(),
+                    "limit", limit, "has_more", hasMore,
                     "mermaid", toMermaidFromEdges(edges, null));
             }
-            return Map.of("edges", edges, "count", edges.size());
+            var resp = new LinkedHashMap<String, Object>();
+            resp.put("edges", edges);
+            resp.put("count", edges.size());
+            resp.put("limit", limit);
+            resp.put("has_more", hasMore);
+            return resp;
         }));
     }
+
+    /** BFS bounds for /callgraph/path — prevents OOM on pathological graphs. */
+    private static final int PATH_MAX_DEPTH = 20;
+    private static final int PATH_MAX_QUEUE = 50_000;
+    private static final int PATH_MAX_VISITED = 100_000;
 
     public void handleCallGraphPath(HttpExchange ex) throws Exception {
         var req = ctx.parseRequest(ex);
         String startAddr = ctx.requireParam(req, "start");
         String endAddr = ctx.requireParam(req, "end");
         String format = String.valueOf(req.getOrDefault("format", "json"));
+        int maxDepth = Math.min(Math.max(1, ctx.intParam(req, "max_depth", PATH_MAX_DEPTH)), PATH_MAX_DEPTH);
         Program p = ctx.resolveProgram(req);
 
         ctx.sendOk(ex, ctx.withRead(() -> {
@@ -103,45 +123,61 @@ public class CallGraphHandler {
 
             var queue = new ArrayDeque<List<String>>();
             var visited = new HashSet<String>();
+            String startAddrStr = startFunc.getEntryPoint().toString();
             String target = endFunc.getEntryPoint().toString();
-            queue.add(List.of(startFunc.getEntryPoint().toString()));
+            queue.add(List.of(startAddrStr));
+            visited.add(startAddrStr);
+
+            boolean truncated = false;
 
             while (!queue.isEmpty()) {
                 var path = queue.poll();
                 String current = path.get(path.size() - 1);
 
-                if (!visited.add(current)) continue;
-                if (path.size() > 20) continue;
+                if (path.size() > maxDepth) continue;
+                if (visited.size() > PATH_MAX_VISITED) { truncated = true; break; }
 
                 Function f = p.getFunctionManager().getFunctionAt(
                     p.getAddressFactory().getDefaultAddressSpace().getAddress(current));
                 if (f == null) continue;
                 for (var ref : ctx.getCallRefsFrom(p, f)) {
                     Function callee = p.getFunctionManager().getFunctionAt(ref.getToAddress());
-                    if (callee != null) {
-                        String calleeAddr = callee.getEntryPoint().toString();
-                        if (visited.contains(calleeAddr)) continue;
-                        var newPath = new ArrayList<>(path);
-                        newPath.add(calleeAddr);
-                        if (calleeAddr.equals(target)) {
-                            var named = new ArrayList<String>();
-                            for (String a : newPath) {
-                                Function nf = p.getFunctionManager().getFunctionAt(
-                                    p.getAddressFactory().getDefaultAddressSpace().getAddress(a));
-                                named.add(nf != null ? nf.getName() : a);
-                            }
-                            if ("mermaid".equalsIgnoreCase(format)) {
-                                return Map.of("found", true, "length", named.size(),
-                                    "path", named, "format", "mermaid",
-                                    "mermaid", pathToMermaid(named));
-                            }
-                            return Map.of("path", named, "length", named.size(), "found", true);
+                    if (callee == null) continue;
+                    String calleeAddr = callee.getEntryPoint().toString();
+                    if (calleeAddr.equals(target)) {
+                        var fullPath = new ArrayList<>(path);
+                        fullPath.add(calleeAddr);
+                        var named = new ArrayList<String>();
+                        for (String a : fullPath) {
+                            Function nf = p.getFunctionManager().getFunctionAt(
+                                p.getAddressFactory().getDefaultAddressSpace().getAddress(a));
+                            named.add(nf != null ? nf.getName() : a);
                         }
-                        queue.add(newPath);
+                        if ("mermaid".equalsIgnoreCase(format)) {
+                            return Map.of("found", true, "length", named.size(),
+                                "path", named, "format", "mermaid",
+                                "mermaid", pathToMermaid(named));
+                        }
+                        return Map.of("path", named, "length", named.size(), "found", true);
                     }
+                    // Enqueue at most once per callee address.
+                    if (!visited.add(calleeAddr)) continue;
+                    if (queue.size() >= PATH_MAX_QUEUE) { truncated = true; break; }
+                    var newPath = new ArrayList<>(path);
+                    newPath.add(calleeAddr);
+                    queue.add(newPath);
                 }
+                if (truncated) break;
             }
-            return Map.of("found", false, "message", "No path found between " + startFunc.getName() + " and " + endFunc.getName());
+            var resp = new LinkedHashMap<String, Object>();
+            resp.put("found", false);
+            resp.put("message", truncated
+                ? "Search aborted at the resource cap (queue=" + PATH_MAX_QUEUE
+                  + ", visited=" + PATH_MAX_VISITED + ", depth=" + maxDepth + ")"
+                : "No path found between " + startFunc.getName() + " and " + endFunc.getName());
+            resp.put("truncated", truncated);
+            resp.put("explored", visited.size());
+            return resp;
         }));
     }
 

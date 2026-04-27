@@ -32,6 +32,13 @@ public class GhidraAgentMcpServer {
             ctx.project = GhidraProject.createProject(ctx.dataDir, "analyzer", false);
         }
 
+        // Re-open programs that were imported in previous server runs.
+        // Done before opening the HTTP port so the first /health response is accurate.
+        ctx.restoreProjectPrograms();
+        if (!ctx.programs.isEmpty()) {
+            System.out.println("[ghidra-agent-mcp] Restored " + ctx.programs.size() + " program(s) from project");
+        }
+
         server = HttpServer.create(new InetSocketAddress(bindAddress, port), 0);
         server.setExecutor(Executors.newFixedThreadPool(10));
         registerEndpoints();
@@ -49,6 +56,8 @@ public class GhidraAgentMcpServer {
         var cg   = new CallGraphHandler(ctx);
         var dt   = new DataTypeHandler(ctx);
         var sch  = new SchemaHandler(ctx);
+        var jobs = new JobsHandler(ctx);
+        var search = new SearchHandler(ctx);
 
         // Program management
         route("/health",        "GET",  prog::handleHealth);
@@ -58,6 +67,10 @@ public class GhidraAgentMcpServer {
         route("/program/close",     "POST", prog::handleProgramClose);
         route("/program/close-all", "POST", prog::handleCloseAll);
         route("/program/info",      "GET",  prog::handleProgramInfo);
+
+        // Background-job tracking
+        route("/jobs",  "GET", jobs::handleList);
+        route("/jobs/", "GET", jobs::handleGet);   // prefix-context for /jobs/{id}
 
         // Function analysis
         route("/functions",          "GET",  func::handleFunctions);
@@ -105,6 +118,9 @@ public class GhidraAgentMcpServer {
         route("/struct",        "GET",  dt::handleStruct);
         route("/struct/create", "POST", dt::handleStructCreate);
         route("/type/apply",    "POST", dt::handleTypeApply);
+
+        // Cross-program search
+        route("/search", "GET", search::handleSearch);
 
         // Schema
         route("/schema", "GET", sch::handleSchema);
@@ -168,7 +184,17 @@ public class GhidraAgentMcpServer {
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             System.out.println("[ghidra-agent-mcp] Shutting down...");
-            server.server.stop(2);
+            try { server.server.stop(2); } catch (Exception ignored) {}
+            // Close the Ghidra project so pending DomainFile writes are flushed to /data.
+            // Without this, programs imported in this session are lost on restart.
+            if (server.ctx.project != null) {
+                try {
+                    server.ctx.project.close();
+                    System.out.println("[ghidra-agent-mcp] Project closed cleanly.");
+                } catch (Exception e) {
+                    System.err.println("[ghidra-agent-mcp] Project close failed: " + e.getMessage());
+                }
+            }
         }));
 
         Thread.currentThread().join();
