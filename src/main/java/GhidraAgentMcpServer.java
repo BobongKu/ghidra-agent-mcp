@@ -22,6 +22,13 @@ public class GhidraAgentMcpServer {
             var layout = new GhidraApplicationLayout();
             var config = new HeadlessGhidraApplicationConfiguration();
             Application.initializeApplication(layout, config);
+            // Initialize the OSGi BundleHost so analyzers that resolve scripts
+            // (e.g. WindowsResourceReferenceAnalyzer) don't NPE on PE imports.
+            // Lazily initialize the OSGi BundleHost so analyzers that resolve
+            // scripts (e.g. WindowsResourceReferenceAnalyzer) don't NPE on PE
+            // imports. This is the same call HeadlessAnalyzer makes; the
+            // returned reference is held for the server's lifetime.
+            ghidra.app.script.GhidraScriptUtil.acquireBundleHostReference();
         }
 
         File projectDir = new File(ctx.dataDir);
