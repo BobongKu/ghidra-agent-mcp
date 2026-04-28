@@ -13,7 +13,10 @@ services:
     volumes:
       - ./binaries:/binaries        # Binary files to analyze
       - ghidra-data:/data            # Ghidra project storage
-      # - ./extensions:/extensions   # Optional: Ghidra extensions
+      # Extra Ghidra extensions on top of the ones baked into the image at
+      # build time (see docker/Dockerfile EXT_* args). Drop .zip files in
+      # ./extensions/ and uncomment to load them at container start.
+      # - ./extensions:/extensions
     environment:
       - GHIDRA_MCP_PORT=8089
       # Container-internal bind. Stays 0.0.0.0 so Docker's port mapping can

@@ -256,6 +256,53 @@ The host port (`docker-compose.yml`) is bound to `127.0.0.1:18089` by default.
 `"0.0.0.0:18089:8089"` — but understand that anyone on your network can then
 upload arbitrary binaries to be analysed.
 
+### Bundled language extensions
+
+The image baked by `docker/Dockerfile` ships with these Ghidra extensions
+pre-installed under `/opt/ghidra/Ghidra/Extensions/`:
+
+| Extension | Version | For | Source |
+|---|---|---|---|
+| GolangAnalyzerExtension | 1.3.0 | Go binaries (go1.6 – go1.26): symbol/type recovery, `runtime.*`, string slices | [mooncat-greenpy/Ghidra_GolangAnalyzerExtension](https://github.com/mooncat-greenpy/Ghidra_GolangAnalyzerExtension) |
+| Kaiju | 260309 | C++ OOAnalyzer (vftable / class recovery), function fingerprinting (CERT/CC, Carnegie Mellon) | [CERTCC/kaiju](https://github.com/CERTCC/kaiju) |
+
+**Rust / Swift / Kotlin (DEX)** are handled by Ghidra 12's built-in demanglers
+and the DEX loader. Candidates we surveyed but did not bundle:
+[GhidRust](https://github.com/DMaroo/GhidRust) and
+[Ayrx/JNIAnalyzer](https://github.com/Ayrx/JNIAnalyzer) ship no release zips
+(source-only builds), [ReOxide](https://reoxide.eu/) is a `pip`-installed
+decompiler replacement rather than a Ghidra `.zip` extension, and
+[felberj/gotools](https://github.com/felberj/gotools) was last released for
+Ghidra 9.x. The Dockerfile therefore leaves the `EXT_RUST_*` / `EXT_SWIFT_*`
+/ `EXT_DEX_*` slots empty — supply URL+SHA256 via `--build-arg` if a
+12.0.3-compatible release appears.
+
+URLs and SHA256 are pinned to **Ghidra 12.0.3**. If you bump `GHIDRA_VERSION`
+in the Dockerfile, you must also update each extension's `EXT_*_URL` /
+`EXT_*_SHA256` to a release that targets the new Ghidra version — Ghidra
+extensions are tightly version-coupled.
+
+To skip the bundled extensions entirely:
+
+```sh
+docker compose -f docker/docker-compose.yml build \
+    --build-arg INSTALL_LANG_EXTENSIONS=false
+```
+
+To add another extension at build time, supply the URL and SHA256 via build
+args, e.g. for a Rust analyzer:
+
+```sh
+docker compose -f docker/docker-compose.yml build \
+    --build-arg EXT_RUST_URL=https://example.com/rust-ext.zip \
+    --build-arg EXT_RUST_SHA256=<sha256>
+```
+
+To layer extensions onto an already-built image without rebuilding, drop
+`.zip` files into `./extensions/` and uncomment the `./extensions:/extensions`
+line in `docker/docker-compose.yml`. They are unpacked on container start by
+`docker/install-extensions.sh`.
+
 ## Workflow examples
 
 ### As an LLM

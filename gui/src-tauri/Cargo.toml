@@ -1,6 +1,6 @@
 [package]
 name = "ghidra-agent-gui"
-version = "1.0.0"
+version = "1.0.1"
 description = "Ghidra Agent MCP — desktop GUI"
 edition = "2021"
 

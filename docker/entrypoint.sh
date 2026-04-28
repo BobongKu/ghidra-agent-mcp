@@ -16,7 +16,8 @@ CP="/app/ghidra-agent-mcp.jar"
 # Include all JARs from Framework and Features modules
 for jar in "$GHIDRA"/Ghidra/Framework/*/lib/*.jar \
            "$GHIDRA"/Ghidra/Features/*/lib/*.jar \
-           "$GHIDRA"/Ghidra/Processors/*/lib/*.jar; do
+           "$GHIDRA"/Ghidra/Processors/*/lib/*.jar \
+           "$GHIDRA"/Ghidra/Extensions/*/lib/*.jar; do
     [ -f "$jar" ] && CP="$CP:$jar"
 done
 

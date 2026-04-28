@@ -14,7 +14,7 @@ public class ProgramHandler {
     public void handleHealth(HttpExchange ex) throws Exception {
         var info = new LinkedHashMap<String, Object>();
         info.put("server", "ghidra-agent-mcp");
-        info.put("version", "1.0.0");
+        info.put("version", "1.0.1");
         Program cp = ctx.getCurrentProgram();
         info.put("programs_loaded", ctx.programs.size());
         info.put("max_programs", ctx.maxPrograms);
