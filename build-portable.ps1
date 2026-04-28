@@ -22,7 +22,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $Root = $PSScriptRoot
-$Version = "1.0.0"
+$Version = "1.0.1"
 $BundleName = "ghidra-agent-mcp-$Version-portable-win-x64"
 $DistDir = "$Root\dist"
 $BundleDir = "$DistDir\$BundleName"

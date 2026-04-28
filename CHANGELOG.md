@@ -4,6 +4,29 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] — 2026-04-28
+
+### Added — Docker image
+- **Bundled Ghidra extensions** at image build time, pinned to Ghidra 12.0.3
+  with SHA256 verification:
+  - **GolangAnalyzerExtension 1.3.0** — Go binary symbol/type recovery
+    (go1.6 – go1.26), `runtime.*` resolution, string slice reconstruction.
+  - **CERTCC Kaiju 260309** — C++ OOAnalyzer (vftable / class recovery),
+    function fingerprinting.
+- New `INSTALL_LANG_EXTENSIONS` build-arg (default `true`) to skip bundling.
+- Empty `EXT_RUST_*` / `EXT_SWIFT_*` / `EXT_DEX_*` slots reserved for
+  build-arg URL+SHA256 overrides if maintained 12.0.3 releases appear.
+
+### Fixed — Docker image
+- Java classpath now includes `Ghidra/Extensions/*/lib/*.jar`, so bundled
+  and user-supplied extensions register at runtime instead of sitting on disk
+  unloaded.
+
+### Docs
+- README "Bundled language extensions" section: extension table, opt-out and
+  add-more recipes, rationale for empty Rust/Swift/Kotlin slots (Ghidra 12
+  built-in demanglers / DEX loader cover those).
+
 ## [1.0.0] — 2026-04-27
 
 First marketable release. The product now ships as three coordinated components
